@@ -5,7 +5,7 @@ import {
   getCoreRowModel,
   flexRender,
 } from "@tanstack/react-table"
-import { format, formatDistanceToNow } from "date-fns"
+import { format, formatDistanceToNow, addDays } from "date-fns"
 import {
   PencilIcon,
   SlidersHorizontalIcon,
@@ -17,12 +17,13 @@ import {
   RotateCcwIcon,
 } from "lucide-react"
 import { useNavigate, useSearchParams, Link } from "react-router-dom"
-import { listUsers } from "../api/authentik"
+import { listUsers, listCachedUsers } from "../api/authentik"
 import type { User, Pagination } from "../api/authentik"
 import { useAuth } from "../auth/AuthContext"
 import { useGroups } from "../hooks/useGroups"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
@@ -36,6 +37,11 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible"
+import {
   Table,
   TableHeader,
   TableBody,
@@ -44,6 +50,7 @@ import {
   TableCell,
 } from "@/components/ui/table"
 import { PageLayout } from "@/components/PageLayout"
+import { MembershipBadge } from "@/components/MembershipBadge"
 
 const VISIBILITY_KEY = "usermanager-column-visibility"
 const PAGE_SIZE = 20
@@ -74,6 +81,7 @@ const SORT_FIELD_MAP: Record<string, string> = {
   email: "email",
   last_login: "last_login",
   created_at: "date_joined",
+  membershipExpiration: "membershipExpiration",
 }
 
 function loadVisibility(): VisibilityState {
@@ -134,38 +142,6 @@ function SortHeader({
   )
 }
 
-function MembershipBadge({ ts }: { ts: number }) {
-  const d = new Date(ts * 1000)
-  const now = new Date()
-  const expired = d < now
-  const daysLeft = (d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  const relative = formatDistanceToNow(d, { addSuffix: true })
-  const label = expired ? `Expired ${relative}` : `Expires ${relative}`
-
-  let badgeClass: string
-  if (expired) {
-    badgeClass =
-      "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800"
-  } else if (daysLeft < 3) {
-    // Desaturated green for expiring very soon
-    badgeClass =
-      "bg-green-50 text-green-700/70 border-green-100 dark:bg-green-900/15 dark:text-green-500/70 dark:border-green-900"
-  } else {
-    badgeClass =
-      "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
-  }
-
-  return (
-    <div className="space-y-1">
-      <Badge variant="outline" className={badgeClass}>
-        {label}
-      </Badge>
-      <div className="text-xs text-muted-foreground">
-        {format(d, "yyyy-MM-dd HH:mm")}
-      </div>
-    </div>
-  )
-}
 
 function buildPageList(
   current: number,
@@ -253,12 +229,20 @@ export function UsersPage() {
   const [sorting, setSorting] = useState<SortingState>(() =>
     sortingFromParam(searchParams.get("sort")),
   )
+  const [membershipFrom, setMembershipFrom] = useState(() => searchParams.get("membershipFrom") ?? "")
+  const [membershipTo, setMembershipTo] = useState(() => searchParams.get("membershipTo") ?? "")
+  const [filtersOpen, setFiltersOpen] = useState(
+    () => !!(searchParams.get("membershipFrom") || searchParams.get("membershipTo")),
+  )
 
   useEffect(() => {
     localStorage.setItem(VISIBILITY_KEY, JSON.stringify(columnVisibility))
   }, [columnVisibility])
 
-  // Sync page + sort to URL
+  // Reset page when filters change
+  useEffect(() => { setPage(1) }, [membershipFrom, membershipTo])
+
+  // Sync page + sort + filters to URL
   useEffect(() => {
     setSearchParams(
       (prev) => {
@@ -270,11 +254,15 @@ export function UsersPage() {
           sorting.length === 1 && sorting[0]!.id === "last_login" && sorting[0]!.desc
         if (sortParam && !isDefault) next.set("sort", sortParam)
         else next.delete("sort")
+        if (membershipFrom) next.set("membershipFrom", membershipFrom)
+        else next.delete("membershipFrom")
+        if (membershipTo) next.set("membershipTo", membershipTo)
+        else next.delete("membershipTo")
         return next
       },
       { replace: true },
     )
-  }, [page, sorting])
+  }, [page, sorting, membershipFrom, membershipTo])
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -290,16 +278,24 @@ export function UsersPage() {
         (SORT_FIELD_MAP[sorting[0]!.id] ?? sorting[0]!.id)
       : undefined
 
+  const shouldUseCachedUsersEndpoint =
+    (sorting.length > 0 && sorting[0]!.id === "membershipExpiration") ||
+    !!membershipFrom ||
+    !!membershipTo
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
     setLoading(true)
     setError(null)
-    listUsers(token, {
+    const fetcher = shouldUseCachedUsersEndpoint ? listCachedUsers : listUsers
+    fetcher(token, {
       search: debouncedSearch || undefined,
       page,
       pageSize: PAGE_SIZE,
       ordering,
+      membershipFrom: membershipFrom || undefined,
+      membershipTo: membershipTo || undefined,
     })
       .then((data) => {
         if (cancelled) return
@@ -315,7 +311,7 @@ export function UsersPage() {
     return () => {
       cancelled = true
     }
-  }, [token, page, debouncedSearch, ordering])
+  }, [token, page, debouncedSearch, ordering, shouldUseCachedUsersEndpoint, membershipFrom, membershipTo])
 
   const handleSortingChange: OnChangeFn<SortingState> = useCallback(
     (updater) => {
@@ -438,9 +434,15 @@ export function UsersPage() {
     },
     {
       id: "membershipExpiration",
-      header: () => <span className="font-bold">Membership Expiration</span>,
+      header: ({ column }) => (
+        <SortHeader
+          label="Membership Expiration"
+          isSorted={column.getIsSorted()}
+          onToggle={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        />
+      ),
       enableHiding: true,
-      enableSorting: false,
+      enableSorting: true,
       cell: ({ row }) => {
         const ts = row.original.attributes.membershipExpirationTimestamp
         if (!ts)
@@ -625,6 +627,67 @@ export function UsersPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* Advanced filters */}
+        {(() => {
+          const today = format(new Date(), "yyyy-MM-dd")
+          const yesterday = format(addDays(new Date(), -1), "yyyy-MM-dd")
+          const sevenDaysAgo = format(addDays(new Date(), -7), "yyyy-MM-dd")
+          const sevenDaysAhead = format(addDays(new Date(), 7), "yyyy-MM-dd")
+          const hasFilter = !!(membershipFrom || membershipTo)
+          return (
+            <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="-ml-2">
+                  <ChevronDownIcon className={`size-4 transition-transform ${filtersOpen ? "rotate-180" : ""}`} />
+                  Advanced filters
+                  {hasFilter && <span className="ml-1 size-1.5 rounded-full bg-primary inline-block" />}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="mt-2 flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Membership expires from</Label>
+                    <Input
+                      type="date"
+                      value={membershipFrom}
+                      onChange={(e) => setMembershipFrom(e.target.value)}
+                      className="w-40 h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">To</Label>
+                    <Input
+                      type="date"
+                      value={membershipTo}
+                      onChange={(e) => setMembershipTo(e.target.value)}
+                      className="w-40 h-8 text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pb-0.5">
+                    <Button variant="outline" size="sm" onClick={() => { setMembershipFrom(today); setMembershipTo("") }}>
+                      Active
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => { setMembershipFrom(""); setMembershipTo(yesterday) }}>
+                      Expired
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => { setMembershipFrom(sevenDaysAgo); setMembershipTo(yesterday) }}>
+                      Expired in last 7 days
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => { setMembershipFrom(today); setMembershipTo(sevenDaysAhead) }}>
+                      Expires in 7 days
+                    </Button>
+                    {hasFilter && (
+                      <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => { setMembershipFrom(""); setMembershipTo("") }}>
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )
+        })()}
 
         {error && (
           <div className="rounded-md bg-destructive/10 text-destructive px-4 py-2 text-sm border border-destructive/20">

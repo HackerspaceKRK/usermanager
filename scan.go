@@ -5,16 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
-	"net/http"
-	"strings"
 	"sync"
 
-	"github.com/gorilla/websocket"
+	"github.com/gofiber/contrib/websocket"
 )
-
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
-}
 
 type scanMsg struct {
 	Type    string `json:"type"`
@@ -38,14 +32,7 @@ func newScanHub() *scanHub {
 	return &scanHub{sessions: make(map[string]*scanSession)}
 }
 
-func (h *scanHub) handleDesktopScan(w http.ResponseWriter, r *http.Request) {
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("scan WS upgrade: %v", err)
-		return
-	}
-
-	// Generate random scan ID
+func (h *scanHub) handleDesktopScan(conn *websocket.Conn) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
 		_ = conn.Close()
@@ -70,38 +57,26 @@ func (h *scanHub) handleDesktopScan(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 	}()
 
-	// Tell the desktop its scan ID
 	if err := conn.WriteJSON(scanMsg{Type: "scanid", ScanID: scanID}); err != nil {
 		return
 	}
 
-	// Pump: forward any message from mobile to desktop; desktop sends nothing meaningful
+	// Pump desktop reads — desktop sends nothing meaningful but we need to drain
 	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
+		if _, _, err := conn.ReadMessage(); err != nil {
 			return
 		}
 	}
 }
 
-func (h *scanHub) handleMobileScan(w http.ResponseWriter, r *http.Request) {
-	scanID := strings.TrimPrefix(r.URL.Path, "/ws/scan/")
-	if scanID == "" {
-		http.NotFound(w, r)
-		return
-	}
+func (h *scanHub) handleMobileScan(conn *websocket.Conn) {
+	scanID := conn.Params("scanid")
 
 	h.mu.Lock()
 	sess, ok := h.sessions[scanID]
 	h.mu.Unlock()
 	if !ok {
-		http.Error(w, "scan session not found", http.StatusNotFound)
-		return
-	}
-
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("mobile WS upgrade: %v", err)
+		log.Printf("mobile WS: session %q not found", scanID)
 		return
 	}
 
@@ -120,11 +95,9 @@ func (h *scanHub) handleMobileScan(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Acknowledge to mobile
 	if err := conn.WriteJSON(scanMsg{Type: "connected"}); err != nil {
 		return
 	}
-	// Notify desktop
 	if desktop != nil {
 		if err := desktop.WriteJSON(scanMsg{Type: "phone_connected"}); err != nil {
 			return

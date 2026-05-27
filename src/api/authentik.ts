@@ -151,7 +151,68 @@ export async function getMe(token: string): Promise<User> {
     headers: authHeaders(token),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json() as Promise<User>
+  const data = await res.json() as { user: User } | User
+  return "user" in data ? data.user : data
+}
+
+export async function listCachedUsers(
+  token: string,
+  params: {
+    search?: string
+    page?: number
+    pageSize?: number
+    ordering?: string
+    membershipFrom?: string
+    membershipTo?: string
+  } = {},
+): Promise<PaginatedUserList> {
+  const query = new URLSearchParams()
+  if (params.search) query.set("search", params.search)
+  if (params.page) query.set("page", String(params.page))
+  if (params.pageSize) query.set("page_size", String(params.pageSize))
+  if (params.ordering) query.set("ordering", params.ordering)
+  if (params.membershipFrom) query.set("membershipFrom", params.membershipFrom)
+  if (params.membershipTo) query.set("membershipTo", params.membershipTo)
+  const res = await fetch(`/api/local/cached-users?${query.toString()}`, {
+    headers: authHeaders(token),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json() as Promise<PaginatedUserList>
+}
+
+export interface SummaryUser {
+  pk: number
+  username: string
+  name: string
+  avatar: string
+  membershipTs: number
+}
+
+export interface Summary {
+  totalUsers: number
+  activeMembers: number
+  expiredRecently: number
+  expiringIn7Days: number
+  expiredRecentlyUsers: SummaryUser[]
+  expiringIn7DaysUsers: SummaryUser[]
+}
+
+export async function getSummary(token: string): Promise<Summary> {
+  const res = await fetch("/api/local/summary", { headers: authHeaders(token) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json() as Promise<Summary>
+}
+
+export async function setUserPassword(token: string, pk: number, password: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/core/users/${pk}/set_password/`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({ password }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`HTTP ${res.status}: ${text}`)
+  }
 }
 
 export async function listGroups(token: string): Promise<Group[]> {

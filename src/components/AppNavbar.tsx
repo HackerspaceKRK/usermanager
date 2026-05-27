@@ -64,7 +64,7 @@ export function AppNavbar() {
               <div className="size-7 rounded-full bg-muted flex items-center justify-center shrink-0">
                 <UserIcon className="size-4 text-muted-foreground" />
               </div>
-              <span className="font-medium hidden lg:inline">{me.name || me.username}</span>
+              <span className="font-medium">{me.username}</span>
             </div>
           )}
           <ModeToggle />

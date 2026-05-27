@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { format, addDays } from "date-fns"
+import { format, addDays, formatDistanceToNow } from "date-fns"
 import { fromZonedTime, toZonedTime } from "date-fns-tz"
 import {
   ArrowLeftIcon,
@@ -10,7 +10,7 @@ import {
   Loader2Icon,
 } from "lucide-react"
 import { useAuth } from "@/auth/AuthContext"
-import { getUser, updateUser, createUser, listGroups } from "@/api/authentik"
+import { getUser, updateUser, createUser, setUserPassword, listGroups } from "@/api/authentik"
 import type { User, Group } from "@/api/authentik"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -113,6 +113,9 @@ export function EditUserPage() {
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]) // group UUIDs
   const [allGroups, setAllGroups] = useState<Group[]>([])
 
+  const [password, setPassword] = useState("")
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
   const [loadingUser, setLoadingUser] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -150,9 +153,31 @@ export function EditUserPage() {
       })
   }, [token, pk, isNew])
 
+  function validate(): Record<string, string> {
+    const e: Record<string, string> = {}
+    if (!username.trim())
+      e.username = "Username is required"
+    else if (username.length > 150)
+      e.username = "Username must be 150 characters or fewer"
+    if (!displayName.trim())
+      e.name = "Name is required"
+    if (!email.trim())
+      e.email = "Email is required"
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      e.email = "Enter a valid email address"
+    return e
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     if (!token) return
+
+    const validationErrors = validate()
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
+      return
+    }
+
     setSaving(true)
     setSaveError(null)
 
@@ -167,13 +192,14 @@ export function EditUserPage() {
 
     try {
       if (isNew) {
-        await createUser(token, {
+        const created = await createUser(token, {
           username,
           email: email || undefined,
           name: displayName || undefined,
           attributes,
           groups: selectedGroups,
         })
+        if (password) await setUserPassword(token, created.pk, password)
       } else if (pk !== null) {
         await updateUser(token, pk, {
           username,
@@ -182,6 +208,7 @@ export function EditUserPage() {
           attributes,
           groups: selectedGroups,
         })
+        if (password) await setUserPassword(token, pk, password)
       }
       navigate("/users")
     } catch (err) {
@@ -222,10 +249,15 @@ export function EditUserPage() {
               <Input
                 id="username"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
+                onChange={(e) => {
+                  setUsername(e.target.value)
+                  setErrors((prev) => ({ ...prev, username: "" }))
+                }}
                 autoComplete="off"
               />
+              {errors.username && (
+                <p className="text-xs text-destructive">{errors.username}</p>
+              )}
             </Field>
 
             <Field label="Email" htmlFor="email">
@@ -233,15 +265,38 @@ export function EditUserPage() {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setErrors((prev) => ({ ...prev, email: "" }))
+                }}
               />
+              {errors.email && (
+                <p className="text-xs text-destructive">{errors.email}</p>
+              )}
             </Field>
 
             <Field label="Display name" htmlFor="displayName">
               <Input
                 id="displayName"
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(e) => {
+                  setDisplayName(e.target.value)
+                  setErrors((prev) => ({ ...prev, name: "" }))
+                }}
+              />
+              {errors.name && (
+                <p className="text-xs text-destructive">{errors.name}</p>
+              )}
+            </Field>
+
+            <Field label="Password" htmlFor="password">
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                placeholder={isNew ? "Optional" : "Leave blank to keep current password"}
               />
             </Field>
 
@@ -299,22 +354,31 @@ export function EditUserPage() {
                 onChange={(e) => setMembershipDate(e.target.value)}
                 className="w-44"
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setMembershipDate(extendDate(membershipDate, 1))}
-              >
-                +1 day
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setMembershipDate(extendDate(membershipDate, 7))}
-              >
-                +7 days
-              </Button>
+              {(() => {
+                const baseIsToday =
+                  !membershipDate ||
+                  new Date(membershipDate + "T00:00:00") <= new Date()
+                return (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setMembershipDate(extendDate(membershipDate, 1))}
+                    >
+                      {baseIsToday ? "+1 day from today" : "+1 day"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setMembershipDate(extendDate(membershipDate, 7))}
+                    >
+                      {baseIsToday ? "+7 days from today" : "+7 days"}
+                    </Button>
+                  </>
+                )
+              })()}
               {membershipDate && (
                 <Button
                   type="button"
@@ -329,12 +393,12 @@ export function EditUserPage() {
             </div>
             {membershipDate && (
               <p className="text-xs text-muted-foreground">
-                Expires {membershipDate} at 23:59 Europe/Warsaw (
-                {format(
-                  fromZonedTime(`${membershipDate}T23:59:00`, TZ),
-                  "yyyy-MM-dd HH:mm 'UTC'",
-                )}
-                )
+                {(() => {
+                  const expiry = fromZonedTime(`${membershipDate}T23:59:00`, TZ)
+                  const relative = formatDistanceToNow(expiry, { addSuffix: true })
+                  const label = expiry < new Date() ? `Expired ${relative}` : `Expires ${relative}`
+                  return `${label} · ${format(toZonedTime(expiry, TZ), "yyyy-MM-dd HH:mm")} Europe/Warsaw`
+                })()}
               </p>
             )}
           </div>
