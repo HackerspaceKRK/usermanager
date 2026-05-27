@@ -276,7 +276,7 @@ export function EditUserPage() {
               )}
             </Field>
 
-            <Field label="Display name" htmlFor="displayName">
+            <Field label="First name and Last name" htmlFor="displayName">
               <Input
                 id="displayName"
                 value={displayName}
