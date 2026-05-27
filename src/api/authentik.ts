@@ -1,6 +1,6 @@
 export interface UserAttributes {
   mifareCardId?: string[]
-  bankAccountNumber?: string
+  bankAccountNumber?: string | string[]
   telegramIDs?: string[]
   membershipExpirationTimestamp?: number
   [key: string]: unknown

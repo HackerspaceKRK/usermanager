@@ -106,7 +106,7 @@ export function EditUserPage() {
   const [username, setUsername] = useState("")
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
-  const [bankAccount, setBankAccount] = useState("")
+  const [bankAccounts, setBankAccounts] = useState<string[]>([])
   const [membershipDate, setMembershipDate] = useState("") // "yyyy-MM-dd" or ""
   const [telegramIds, setTelegramIds] = useState<string[]>([])
   const [mifareIds, setMifareIds] = useState<string[]>([])
@@ -138,7 +138,8 @@ export function EditUserPage() {
         setUsername(u.username)
         setEmail(u.email ?? "")
         setDisplayName(u.name ?? "")
-        setBankAccount(u.attributes.bankAccountNumber ?? "")
+        const raw = u.attributes.bankAccountNumber
+        setBankAccounts(Array.isArray(raw) ? raw : raw ? [raw] : [])
         if (u.attributes.membershipExpirationTimestamp) {
           setMembershipDate(tsToDateStr(u.attributes.membershipExpirationTimestamp))
         }
@@ -182,7 +183,7 @@ export function EditUserPage() {
     setSaveError(null)
 
     const attributes = {
-      bankAccountNumber: bankAccount || undefined,
+      bankAccountNumber: bankAccounts.filter(Boolean),
       membershipExpirationTimestamp: membershipDate
         ? dateStrToTs(membershipDate)
         : undefined,
@@ -300,13 +301,6 @@ export function EditUserPage() {
               />
             </Field>
 
-            <Field label="Bank account number" htmlFor="bankAccount">
-              <Input
-                id="bankAccount"
-                value={bankAccount}
-                onChange={(e) => setBankAccount(e.target.value)}
-              />
-            </Field>
 
             <Field label="Groups">
               <Combobox
@@ -401,6 +395,33 @@ export function EditUserPage() {
                 })()}
               </p>
             )}
+          </div>
+
+          {/* Bank account numbers */}
+          <div className="space-y-2">
+            <Label>Bank account numbers</Label>
+            <div className="space-y-2">
+              {bankAccounts.map((v, i) => (
+                <ListRow key={i} onRemove={() => setBankAccounts((prev) => prev.filter((_, j) => j !== i))}>
+                  <Input
+                    value={v}
+                    placeholder="e.g. PL61109010140000071219812874"
+                    onChange={(e) =>
+                      setBankAccounts((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))
+                    }
+                  />
+                </ListRow>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setBankAccounts((prev) => [...prev, ""])}
+            >
+              <PlusIcon className="size-4" />
+              Add bank account
+            </Button>
           </div>
 
           {/* Telegram IDs */}

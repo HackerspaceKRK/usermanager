@@ -476,10 +476,17 @@ export function UsersPage() {
       enableHiding: true,
       enableSorting: false,
       cell: ({ row }) => {
-        const ban = row.original.attributes.bankAccountNumber
-        if (!ban)
+        const raw = row.original.attributes.bankAccountNumber
+        const bans = Array.isArray(raw) ? raw : raw ? [raw] : []
+        if (bans.length === 0)
           return <span className="text-muted-foreground text-sm">—</span>
-        return <span className="font-mono text-xs">{ban}</span>
+        return (
+          <div className="space-y-0.5">
+            {bans.map((b, i) => (
+              <div key={i} className="font-mono text-xs">{b}</div>
+            ))}
+          </div>
+        )
       },
     },
     {
