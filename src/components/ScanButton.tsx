@@ -24,7 +24,7 @@ declare class NDEFReader {
   removeEventListener(type: "reading", cb: (e: NDEFReadingEvent) => void): void
 }
 
-interface ScanButtonProps {
+interface WebNFCScanButtonProps {
   onScan: (cardId: string) => void
 }
 
@@ -49,7 +49,7 @@ function wsUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/scan`
 }
 
-export function ScanButton({ onScan }: ScanButtonProps) {
+export function WebNFCScanButton({ onScan }: WebNFCScanButtonProps) {
   const hasNfc = typeof window !== "undefined" && "NDEFReader" in window
 
   // ── Mobile path (Web NFC) ────────────────────────────────────────────────
@@ -162,7 +162,7 @@ export function ScanButton({ onScan }: ScanButtonProps) {
       <>
         <Button type="button" variant="outline" size="sm" onClick={startMobileNfc}>
           <ScanIcon className="size-4" />
-          Scan NFC
+          Scan with Android Phone
         </Button>
 
         <Dialog open={nfcOpen} onOpenChange={(v) => { if (!v) cancelNfc() }}>
@@ -198,7 +198,7 @@ export function ScanButton({ onScan }: ScanButtonProps) {
       <PopoverTrigger asChild>
         <Button type="button" variant="outline" size="sm">
           <ScanIcon className="size-4" />
-          Scan NFC
+          Scan with Android Phone
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -237,6 +237,9 @@ export function ScanButton({ onScan }: ScanButtonProps) {
               <div className="p-2 bg-white rounded-md">
                 <QRCodeSVG value={desktopState.qrUrl} size={176} />
               </div>
+              <p className="text-xs text-muted-foreground text-center">
+                Works on Android Google Chrome only
+              </p>
             </>
           )}
 

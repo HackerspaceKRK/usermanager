@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PageLayout } from "@/components/PageLayout"
-import { ScanButton } from "@/components/ScanButton"
+import { WebNFCScanButton } from "@/components/ScanButton"
+import { ProxmarkScanButton } from "@/components/ProxmarkScanButton"
 import {
   Combobox,
   ComboboxChip,
@@ -403,13 +404,19 @@ export function EditUserPage() {
             <div className="space-y-2">
               {bankAccounts.map((v, i) => (
                 <ListRow key={i} onRemove={() => setBankAccounts((prev) => prev.filter((_, j) => j !== i))}>
-                  <Input
-                    value={v}
-                    placeholder="e.g. PL61109010140000071219812874"
-                    onChange={(e) =>
-                      setBankAccounts((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))
-                    }
-                  />
+                  <div className="flex flex-col gap-1">
+                    <Input
+                      value={v}
+                      onChange={(e) =>
+                        setBankAccounts((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))
+                      }
+                    />
+                    {v && !/^\d{2} \d{4} \d{4} \d{4} \d{4} \d{4} \d{4}$/.test(v) && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Invalid format — expected: DD DDDD DDDD DDDD DDDD DDDD DDDD
+                      </p>
+                    )}
+                  </div>
                 </ListRow>
               ))}
             </div>
@@ -460,7 +467,6 @@ export function EditUserPage() {
                 <ListRow key={i} onRemove={() => setMifareIds((prev) => prev.filter((_, j) => j !== i))}>
                   <Input
                     value={v}
-                    placeholder="e.g. 04a2b3c4"
                     className="font-mono"
                     onChange={(e) =>
                       setMifareIds((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))
@@ -479,7 +485,8 @@ export function EditUserPage() {
                 <PlusIcon className="size-4" />
                 Add manually
               </Button>
-              <ScanButton onScan={(cardId) => setMifareIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId])} />
+              <WebNFCScanButton onScan={(cardId) => setMifareIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId])} />
+              <ProxmarkScanButton onScan={(cardId) => setMifareIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId])} />
             </div>
           </div>
 
