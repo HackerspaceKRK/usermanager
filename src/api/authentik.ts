@@ -3,6 +3,7 @@ export interface UserAttributes {
   bankAccountNumber?: string | string[]
   telegramIDs?: string[]
   membershipExpirationTimestamp?: number
+  foundUsBy?: string
   [key: string]: unknown
 }
 
