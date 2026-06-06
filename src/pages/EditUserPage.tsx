@@ -30,6 +30,7 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 const TZ = "Europe/Warsaw"
 
@@ -113,6 +114,7 @@ export function EditUserPage() {
   const [mifareIds, setMifareIds] = useState<string[]>([])
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]) // group UUIDs
   const [allGroups, setAllGroups] = useState<Group[]>([])
+  const [foundUsBy, setFoundUsBy] = useState("")
 
   const [password, setPassword] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -147,6 +149,7 @@ export function EditUserPage() {
         setTelegramIds(u.attributes.telegramIDs?.map(String) ?? [])
         setMifareIds(u.attributes.mifareCardId ?? [])
         setSelectedGroups(u.groups ?? [])
+        setFoundUsBy(u.attributes.foundUsBy ?? "")
         setLoadingUser(false)
       })
       .catch((err: unknown) => {
@@ -190,6 +193,7 @@ export function EditUserPage() {
         : undefined,
       telegramIDs: telegramIds.filter(Boolean),
       mifareCardId: mifareIds.filter(Boolean),
+      foundUsBy: foundUsBy ? foundUsBy : undefined
     }
 
     try {
@@ -488,6 +492,25 @@ export function EditUserPage() {
               <WebNFCScanButton onScan={(cardId) => setMifareIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId])} />
               <ProxmarkScanButton onScan={(cardId) => setMifareIds((prev) => prev.includes(cardId) ? prev : [...prev, cardId])} />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Field label="Found us by">
+              <Select value={foundUsBy} onValueChange={(value) => setFoundUsBy(value === "other" ? "" : value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select value..." />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="meetup">Meetup</SelectItem>
+                  <SelectItem value="facebook">Facebook</SelectItem>
+                  <SelectItem value="friend">Friend</SelectItem>
+                  <SelectItem value="polandrock">Pol'and'Rock</SelectItem>
+                  <SelectItem value="burzenin">Burzenin</SelectItem>
+                  <SelectItem value="govermnent">City/govt brochure etc</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
 
           {saveError && (
