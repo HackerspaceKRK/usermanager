@@ -193,7 +193,7 @@ export function EditUserPage() {
         : undefined,
       telegramIDs: telegramIds.filter(Boolean),
       mifareCardId: mifareIds.filter(Boolean),
-      foundUsBy: !!foundUsBy ? foundUsBy : undefined
+      foundUsBy: foundUsBy ? foundUsBy : undefined
     }
 
     try {
