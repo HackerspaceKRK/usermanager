@@ -8,7 +8,6 @@ import {
   XIcon,
   SaveIcon,
   Loader2Icon,
-  Trash,
 } from "lucide-react"
 import { useAuth } from "@/auth/AuthContext"
 import { getUser, updateUser, createUser, setUserPassword, listGroups } from "@/api/authentik"
