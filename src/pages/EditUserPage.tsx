@@ -503,6 +503,7 @@ export function EditUserPage() {
                 <SelectContent align="end">
                   <SelectItem value="other">Other</SelectItem>
                   <SelectItem value="meetup">Meetup</SelectItem>
+                  <SelectItem value="ai">AI</SelectItem>
                   <SelectItem value="facebook">Facebook</SelectItem>
                   <SelectItem value="friend">Friend</SelectItem>
                   <SelectItem value="polandrock">Pol'and'Rock</SelectItem>
