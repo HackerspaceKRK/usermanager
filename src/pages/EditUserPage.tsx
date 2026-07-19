@@ -115,6 +115,7 @@ export function EditUserPage() {
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]) // group UUIDs
   const [allGroups, setAllGroups] = useState<Group[]>([])
   const [foundUsBy, setFoundUsBy] = useState("")
+  const [joinedDate, setJoinedDate] = useState("")
 
   const [password, setPassword] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -150,6 +151,7 @@ export function EditUserPage() {
         setMifareIds(u.attributes.mifareCardId ?? [])
         setSelectedGroups(u.groups ?? [])
         setFoundUsBy(u.attributes.foundUsBy ?? "")
+        setJoinedDate(u.date_joined)
         setLoadingUser(false)
       })
       .catch((err: unknown) => {
@@ -263,6 +265,17 @@ export function EditUserPage() {
               />
               {errors.username && (
                 <p className="text-xs text-destructive">{errors.username}</p>
+              )}
+            </Field>
+
+            <Field label="Joined on" htmlFor="joined_date">
+              <Input
+                id="joined_date"
+                value={joinedDate}
+                disabled={true}
+                />
+              {new Date(joinedDate) < new Date("2023-08-01") && (
+                <p className="text-xs text-accent">Joined date might be unreliable, user might've joined before we started using Authentik.</p>
               )}
             </Field>
 
