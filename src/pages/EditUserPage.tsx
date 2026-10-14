@@ -135,6 +135,9 @@ export function EditUserPage() {
   const [foundUsBy, setFoundUsBy] = useState("")
   const [joinedDate, setJoinedDate] = useState("")
   const [matrixHandles, setMatrixHandles] = useState<string[]>([])
+  // telegramIDs is shared with other tools (and written by the im-inviter bot): keep the stored format. A value that
+  // was stored as text ("1, 2") is saved back as text; a list stays a list.
+  const [telegramIdsAsText, setTelegramIdsAsText] = useState(false)
   const [baseAttributes, setBaseAttributes] = useState<UserAttributes>({}) // as loaded; see mergeAttributes
 
   const [password, setPassword] = useState("")
@@ -168,6 +171,7 @@ export function EditUserPage() {
           setMembershipDate(tsToDateStr(u.attributes.membershipExpirationTimestamp))
         }
         setTelegramIds(listAttr(u.attributes.telegramIDs)) // may be stored as an array or as "1, 2"
+        setTelegramIdsAsText(typeof u.attributes.telegramIDs === "string")
         setMifareIds(u.attributes.mifareCardId ?? [])
         setSelectedGroups(u.groups ?? [])
         setFoundUsBy(u.attributes.foundUsBy ?? "")
@@ -218,7 +222,7 @@ export function EditUserPage() {
       membershipExpirationTimestamp: membershipDate
         ? dateStrToTs(membershipDate)
         : undefined,
-      telegramIDs: telegramIds.filter(Boolean),
+      telegramIDs: telegramIdsAsText ? telegramIds.filter(Boolean).join(", ") : telegramIds.filter(Boolean),
       mifareCardId: mifareIds.filter(Boolean),
       foundUsBy: foundUsBy ? foundUsBy : undefined,
       matrixHandles: cleanedHandles.length > 0 ? cleanedHandles : undefined,
