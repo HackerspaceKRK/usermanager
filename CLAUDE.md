@@ -35,8 +35,9 @@ This is a single-binary admin UI for managing [Authentik](https://goauthentik.io
 
 - **`integrations.go`** — Matrix/Telegram integration, a read-only view of attributes maintained by the
   [im-inviter](https://github.com/HackerspaceKRK/im-inviter) bot (contract: its `docs/usermanager-integration.md`).
-  `computeIntegrationStats` feeds `integrations` in `/api/local/summary`; `/api/local/matrix-users` lists users that have
-  `matrixHandles` (with the bot's `matrixAccounts` / `matrixInviteResults` / `matrixInviteRequests`). List attributes
+  `computeIntegrationStats` feeds `integrations` in `/api/local/summary`; `/api/local/account-users` lists users that have any
+  messenger account (`matrixHandles`, `telegramIDs` or a pending `telegramUsername`) with the bot's `matrixAccounts` and
+  the manual-invite queues/results (`matrixInvite*`, `telegramInvite*`). List attributes
   (`matrixHandles`, `telegramIDs`) may be stored as a JSON array or as a string like `"288245411, 111111111"`;
   `attrStrings` (Go) and `listAttr` (TS) read both.
 
@@ -63,9 +64,11 @@ partial object: start from the user's loaded attributes and overwrite only the k
 `EditUserPage`, `requestMatrixInvite` in the API layer). Otherwise attributes of other tools (bot statuses, Authentik
 settings, ...) are wiped. Attribute naming is camelCase (`telegramIDs`, `matrixHandles`, ...).
 
-**Manual Matrix invites:** the Invitations page appends `{handle, by, ts}` to the user's `matrixInviteRequests`; the bot
-executes it on its next run (about a minute) and writes the outcome to `matrixInviteResults`. The page polls while a
-request is queued. The bot only honors handles on that user's own `matrixHandles`, and no Matrix credentials live here.
+**Manual invites:** the Invitations page is one table with a row per account of any messenger (user, account, state, last
+manual invite, action). Invite appends `{handle|id, by, ts}` to the user's `matrixInviteRequests` (Matrix: invite to every
+configured room/space) or `telegramInviteRequests` (Telegram: send fresh group invite links in a DM); the bot executes it on
+its next run (about a minute) and writes the outcome to `matrixInviteResults` / `telegramInviteResults`. The page polls
+while a request is queued. The bot only honors accounts on that user's own lists, and no Matrix/Telegram credentials live here.
 
 **Key hooks:**
 - `useAuth()` — token + logout from `AuthContext`

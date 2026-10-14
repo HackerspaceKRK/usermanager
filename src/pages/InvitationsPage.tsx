@@ -4,21 +4,34 @@ import { format, formatDistanceToNow } from "date-fns"
 import { Loader2Icon, RefreshCwIcon, SearchIcon, SendIcon } from "lucide-react"
 import { useAuth } from "@/auth/AuthContext"
 import { useMe } from "@/hooks/useMe"
-import { listMatrixUsers, requestMatrixInvite } from "@/api/authentik"
-import type { MatrixInviteResult, MatrixUser, MatrixUsersResponse } from "@/api/authentik"
+import { listAccountUsers, requestMatrixInvite, requestTelegramInvite } from "@/api/authentik"
+import type { AccountUser, AccountUsersResponse } from "@/api/authentik"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  MatrixAccountBadge,
-  TelegramStatusBadge,
-  isProblemState,
-} from "@/components/IntegrationBadges"
+import { MatrixAccountBadge, TelegramAccountBadge, isProblemState } from "@/components/IntegrationBadges"
 
 const POLL_MS = 5000 // how often we re-read while a manual invite is waiting for the bot
 const WAIT_TIMEOUT_S = 180 // stop waiting for the bot after this long
+
+type AccountKind = "matrix" | "telegram"
+
+/** One account of a user in any messenger; the table shows one row per account. */
+interface AccountRow {
+  key: string // unique per user: "<kind>:<id>" (a pending @username request uses "telegram-request:<@name>")
+  kind: AccountKind
+  id: string // Matrix handle, Telegram ID, or the @username of a pending Telegram request
+  pendingUsername: boolean // a Telegram @username that has not sent /start yet (nothing to invite)
+}
+
+interface LastResult {
+  ts: number
+  by: string
+  result: string
+}
 
 function initials(name: string, username: string): string {
   const parts = name.trim().split(/\s+/)
@@ -28,28 +41,61 @@ function initials(name: string, username: string): string {
   return (name[0] ?? username[0] ?? "?").toUpperCase()
 }
 
-function lastResult(u: MatrixUser, handle: string): MatrixInviteResult | undefined {
-  const results = (u.matrixInviteResults ?? []).filter((r) => r.handle === handle)
-  return results[results.length - 1]
+function accountRows(u: AccountUser): AccountRow[] {
+  const rows: AccountRow[] = u.matrixHandles.map((h) => ({
+    key: `matrix:${h}`, kind: "matrix", id: h, pendingUsername: false,
+  }))
+  for (const id of u.telegramIDs) {
+    rows.push({ key: `telegram:${id}`, kind: "telegram", id, pendingUsername: false })
+  }
+  if (u.telegramUsername) {
+    rows.push({
+      key: `telegram-request:${u.telegramUsername}`, kind: "telegram", id: u.telegramUsername, pendingUsername: true,
+    })
+  }
+  return rows
 }
 
-function hasProblem(u: MatrixUser): boolean {
+function lastResult(u: AccountUser, row: AccountRow): LastResult | undefined {
+  if (row.pendingUsername) return undefined
+  const results =
+    row.kind === "matrix"
+      ? (u.matrixInviteResults ?? []).filter((r) => r.handle === row.id)
+      : (u.telegramInviteResults ?? []).filter((r) => r.id === row.id)
+  const last = results[results.length - 1]
+  return last ? { ts: last.ts, by: last.by, result: last.result } : undefined
+}
+
+function isQueued(u: AccountUser, row: AccountRow): boolean {
+  return row.kind === "matrix"
+    ? (u.matrixInviteRequests ?? []).some((r) => r.handle === row.id)
+    : (u.telegramInviteRequests ?? []).some((r) => r.id === row.id)
+}
+
+function hasProblem(u: AccountUser): boolean {
   if (u.matrixStatus && u.matrixStatus !== "ok") return true
+  if (u.telegramStatus && u.telegramStatus !== "ok") return true
   return u.matrixHandles.some((h) => {
     const account = u.matrixAccounts?.[h]
     return account !== undefined && isProblemState(account.state)
   })
 }
 
+/** "pk:<kind>:<id>" -> parts (the id of a Matrix account itself contains ":"). */
+function parseWaitingKey(key: string): { pk: string; kind: string; id: string } {
+  const [pk = "", kind = "", ...rest] = key.split(":")
+  return { pk, kind, id: rest.join(":") }
+}
+
 export function InvitationsPage() {
   const { token } = useAuth()
   const me = useMe(token)
-  const [data, setData] = useState<MatrixUsersResponse | null>(null)
+  const [data, setData] = useState<AccountUsersResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [onlyProblems, setOnlyProblems] = useState(false)
-  // "pk:handle" -> unix seconds when an admin clicked Invite; cleared once the bot reports a result.
+  // "pk:<account key>" -> unix seconds when an admin clicked Invite; cleared once the bot reports a result.
   const [waiting, setWaiting] = useState<Record<string, number>>({})
   const [sending, setSending] = useState<Record<string, boolean>>({})
   const [inviteError, setInviteError] = useState<string | null>(null)
@@ -59,7 +105,7 @@ export function InvitationsPage() {
       if (!token) return
       if (!silent) setLoading(true)
       try {
-        setData(await listMatrixUsers(token))
+        setData(await listAccountUsers(token))
         setError(null)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -81,11 +127,12 @@ export function InvitationsPage() {
     setWaiting((prev) => {
       const next: Record<string, number> = {}
       for (const [key, queuedAt] of Object.entries(prev)) {
-        const [pkStr, ...rest] = key.split(":")
-        const handle = rest.join(":")
-        const u = data.users.find((x) => String(x.pk) === pkStr)
-        const stillQueued = u?.matrixInviteRequests?.some((r) => r.handle === handle) ?? false
-        const reported = u?.matrixInviteResults?.some((r) => r.handle === handle && r.ts >= queuedAt - 5) ?? false
+        const { pk, kind, id } = parseWaitingKey(key)
+        const u = data.users.find((x) => String(x.pk) === pk)
+        const row = u && accountRows(u).find((r) => r.kind === (kind === "matrix" ? "matrix" : "telegram") && r.id === id)
+        const result = u && row ? lastResult(u, row) : undefined
+        const stillQueued = u && row ? isQueued(u, row) : false
+        const reported = !!result && result.ts >= queuedAt - 5
         const timedOut = now - queuedAt > WAIT_TIMEOUT_S
         if ((reported && !stillQueued) || timedOut) continue
         next[key] = queuedAt
@@ -96,7 +143,9 @@ export function InvitationsPage() {
 
   const anyQueued =
     Object.keys(waiting).length > 0 ||
-    (data?.users.some((u) => (u.matrixInviteRequests?.length ?? 0) > 0) ?? false)
+    (data?.users.some(
+      (u) => (u.matrixInviteRequests?.length ?? 0) > 0 || (u.telegramInviteRequests?.length ?? 0) > 0,
+    ) ?? false)
 
   useEffect(() => {
     if (!anyQueued) return
@@ -104,13 +153,14 @@ export function InvitationsPage() {
     return () => clearInterval(t)
   }, [anyQueued, load])
 
-  async function invite(u: MatrixUser, handle: string) {
-    if (!token || !me) return
-    const key = `${u.pk}:${handle}`
+  async function invite(u: AccountUser, row: AccountRow) {
+    if (!token || !me || row.pendingUsername) return
+    const key = `${u.pk}:${row.key}`
     setSending((prev) => ({ ...prev, [key]: true }))
     setInviteError(null)
     try {
-      await requestMatrixInvite(token, u.pk, handle, me.username)
+      if (row.kind === "matrix") await requestMatrixInvite(token, u.pk, row.id, me.username)
+      else await requestTelegramInvite(token, u.pk, row.id, me.username)
       setWaiting((prev) => ({ ...prev, [key]: Math.floor(Date.now() / 1000) }))
       void load(true)
     } catch (err) {
@@ -132,7 +182,7 @@ export function InvitationsPage() {
       return (
         u.username.toLowerCase().includes(q) ||
         u.name.toLowerCase().includes(q) ||
-        u.matrixHandles.some((h) => h.toLowerCase().includes(q))
+        accountRows(u).some((r) => r.id.toLowerCase().includes(q))
       )
     })
   }, [data, search, onlyProblems])
@@ -192,7 +242,7 @@ export function InvitationsPage() {
         <div className="relative max-w-sm w-full">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Search by user or Matrix account..."
+            placeholder="Search by user or account..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -210,8 +260,9 @@ export function InvitationsPage() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Invite sends the account to every configured room and space, ignoring an earlier decline. The bot picks the
-        request up within about a minute and reports the result here.
+        Invite on a Matrix account sends it to every configured room and space, ignoring an earlier decline. On a Telegram
+        account it sends fresh one-time group invite links in a DM (the account must have sent /start to the bot). The bot
+        picks the request up within about a minute and reports the result here.
       </p>
 
       <div className="rounded-md border overflow-x-auto">
@@ -219,7 +270,7 @@ export function InvitationsPage() {
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
               <TableHead className="font-bold">User</TableHead>
-              <TableHead className="font-bold">Matrix account</TableHead>
+              <TableHead className="font-bold">Account</TableHead>
               <TableHead className="font-bold">State</TableHead>
               <TableHead className="font-bold">Last manual invite</TableHead>
               <TableHead className="font-bold text-right">Action</TableHead>
@@ -239,27 +290,28 @@ export function InvitationsPage() {
             ) : users.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
-                  {data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix accounts yet."}
+                  {data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix or Telegram accounts yet."}
                 </TableCell>
               </TableRow>
             ) : (
-              users.map((u) =>
-                u.matrixHandles.map((handle, i) => {
-                  const key = `${u.pk}:${handle}`
-                  const queued = key in waiting || (u.matrixInviteRequests?.some((r) => r.handle === handle) ?? false)
+              users.map((u) => {
+                const rows = accountRows(u)
+                return rows.map((row, i) => {
+                  const key = `${u.pk}:${row.key}`
+                  const queued = key in waiting || isQueued(u, row)
                   const busy = !!sending[key]
-                  const result = lastResult(u, handle)
+                  const result = lastResult(u, row)
                   const ok = result?.result.startsWith("ok")
                   return (
                     <TableRow key={key} className={i === 0 ? "border-t-2" : undefined}>
                       {i === 0 && (
-                        <TableCell rowSpan={u.matrixHandles.length} className="align-top">
-                          <div className="flex items-center gap-3 min-w-40 max-w-56">
+                        <TableCell rowSpan={rows.length} className="align-top">
+                          <div className="flex items-start gap-3 min-w-40 max-w-56">
                             <Avatar>
                               <AvatarImage src={u.avatar} alt={u.name} />
                               <AvatarFallback>{initials(u.name, u.username)}</AvatarFallback>
                             </Avatar>
-                            <div>
+                            <div className="min-w-0">
                               <Link to={`/users/edit/${u.pk}`} className="font-medium leading-tight hover:underline">
                                 {u.username}
                               </Link>
@@ -267,23 +319,34 @@ export function InvitationsPage() {
                               {u.name !== u.username && (
                                 <div className="text-xs text-muted-foreground leading-tight mt-0.5">{u.name}</div>
                               )}
-                              {(u.telegramIDs.length > 0 || u.telegramUsername || u.telegramStatus) && (
-                                <div className="mt-1.5 flex items-start gap-1.5">
-                                  <span className="pt-0.5 text-xs text-muted-foreground">Telegram</span>
-                                  <TelegramStatusBadge
-                                    ids={u.telegramIDs}
-                                    username={u.telegramUsername}
-                                    status={u.telegramStatus}
-                                  />
+                              {u.matrixStatus && u.matrixStatus !== "ok" && (
+                                <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 line-clamp-2" title={u.matrixStatus}>
+                                  Matrix: {u.matrixStatus}
+                                </div>
+                              )}
+                              {u.telegramStatus && u.telegramStatus !== "ok" && (
+                                <div className="mt-1 text-xs text-destructive line-clamp-2" title={u.telegramStatus}>
+                                  Telegram: {u.telegramStatus}
                                 </div>
                               )}
                             </div>
                           </div>
                         </TableCell>
                       )}
-                      <TableCell className="font-mono text-sm">{handle}</TableCell>
                       <TableCell>
-                        <MatrixAccountBadge account={u.matrixAccounts?.[handle]} />
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                            {row.kind === "matrix" ? "Matrix" : "Telegram"}
+                          </Badge>
+                          <span className="font-mono text-sm break-all">{row.id}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {row.kind === "matrix" ? (
+                          <MatrixAccountBadge account={u.matrixAccounts?.[row.id]} />
+                        ) : (
+                          <TelegramAccountBadge pending={row.pendingUsername} />
+                        )}
                       </TableCell>
                       <TableCell className="text-sm max-w-52">
                         {result ? (
@@ -299,20 +362,31 @@ export function InvitationsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={!me || busy || queued}
-                          onClick={() => void invite(u, handle)}
-                        >
-                          {busy || queued ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
-                          {queued ? "Queued…" : "Invite"}
-                        </Button>
+                        {row.pendingUsername ? (
+                          <span className="text-xs text-muted-foreground" title="Nothing to invite yet: this account has to send /start to the bot first">
+                            —
+                          </span>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={!me || busy || queued}
+                            title={
+                              row.kind === "matrix"
+                                ? "Invite this account to every configured room and space"
+                                : "Send fresh one-time group invite links to this account in a DM"
+                            }
+                            onClick={() => void invite(u, row)}
+                          >
+                            {busy || queued ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
+                            {queued ? "Queued…" : "Invite"}
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   )
-                }),
-              )
+                })
+              })
             )}
           </TableBody>
         </Table>

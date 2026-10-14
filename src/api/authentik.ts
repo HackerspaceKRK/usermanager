@@ -29,6 +29,20 @@ export interface MatrixInviteResult {
   rooms: number
 }
 
+export interface TelegramInviteRequest {
+  id: string
+  by: string
+  ts: number | null
+}
+
+export interface TelegramInviteResult {
+  id: string
+  by: string
+  ts: number
+  result: string
+  groups: number
+}
+
 export interface UserAttributes {
   mifareCardId?: string[]
   bankAccountNumber?: string | string[]
@@ -45,6 +59,8 @@ export interface UserAttributes {
   telegramStatus?: string
   // Written here, consumed and cleared by the bot.
   matrixInviteRequests?: MatrixInviteRequest[]
+  telegramInviteRequests?: TelegramInviteRequest[]
+  telegramInviteResults?: TelegramInviteResult[]
   [key: string]: unknown
 }
 
@@ -301,7 +317,7 @@ export async function listGroups(token: string): Promise<Group[]> {
   return groups
 }
 
-export interface MatrixUser {
+export interface AccountUser {
   pk: number
   username: string
   name: string
@@ -315,39 +331,59 @@ export interface MatrixUser {
   telegramIDs: string[]
   telegramUsername: string
   telegramStatus: string
+  telegramInviteRequests: TelegramInviteRequest[] | null
+  telegramInviteResults: TelegramInviteResult[] | null
 }
 
-export interface MatrixUsersResponse {
+export interface AccountUsersResponse {
   stats: IntegrationStats
-  users: MatrixUser[]
+  users: AccountUser[]
 }
 
-export async function listMatrixUsers(token: string): Promise<MatrixUsersResponse> {
-  const res = await fetch("/api/local/matrix-users", { headers: authHeaders(token) })
+/** Users with at least one messenger account (Matrix handle, Telegram ID or a pending Telegram @username). */
+export async function listAccountUsers(token: string): Promise<AccountUsersResponse> {
+  const res = await fetch("/api/local/account-users", { headers: authHeaders(token) })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json() as Promise<MatrixUsersResponse>
+  return res.json() as Promise<AccountUsersResponse>
 }
 
 /**
- * Queues a manual Matrix invite for one of the user's accounts. The im-inviter bot picks the request up on its next
- * run (about a minute), invites the account to every configured room/space and records the outcome in
- * `matrixInviteResults`. The bot only honors handles that are on the user's own `matrixHandles` list.
+ * Appends a request to one of the user's invite queues (`matrixInviteRequests` / `telegramInviteRequests`). The
+ * im-inviter bot picks it up on its next run (about a minute) and records the outcome in the matching `...Results`.
+ * The bot only honors accounts that are on the user's own lists, so a forged request cannot invite anyone else.
  *
  * Authentik replaces the WHOLE `attributes` object on PATCH, so we merge into freshly read attributes.
  */
-export async function requestMatrixInvite(
+async function queueInviteRequest<T extends { by: string; ts: number | null }>(
   token: string,
   pk: number,
-  handle: string,
-  by: string,
+  queueKey: "matrixInviteRequests" | "telegramInviteRequests",
+  isSame: (existing: T) => boolean,
+  request: T,
 ): Promise<void> {
   const user = await getUser(token, pk)
-  const current = Array.isArray(user.attributes.matrixInviteRequests)
-    ? user.attributes.matrixInviteRequests
-    : []
-  if (current.some((r) => r.handle === handle)) return // already queued
-  const request: MatrixInviteRequest = { handle, by, ts: Math.floor(Date.now() / 1000) }
+  const stored = user.attributes[queueKey] as unknown
+  const current = (Array.isArray(stored) ? stored : []) as T[]
+  if (current.some(isSame)) return // already queued
   await updateUser(token, pk, {
-    attributes: { ...user.attributes, matrixInviteRequests: [...current, request] },
+    attributes: { ...user.attributes, [queueKey]: [...current, request] },
   })
+}
+
+/** Manual Matrix invite: the bot invites the account to every configured room and space. */
+export function requestMatrixInvite(token: string, pk: number, handle: string, by: string): Promise<void> {
+  return queueInviteRequest<MatrixInviteRequest>(
+    token, pk, "matrixInviteRequests",
+    (r) => r.handle === handle,
+    { handle, by, ts: Math.floor(Date.now() / 1000) },
+  )
+}
+
+/** Manual Telegram invite: the bot sends fresh one-time group invite links to the account in a DM. */
+export function requestTelegramInvite(token: string, pk: number, id: string, by: string): Promise<void> {
+  return queueInviteRequest<TelegramInviteRequest>(
+    token, pk, "telegramInviteRequests",
+    (r) => r.id === id,
+    { id, by, ts: Math.floor(Date.now() / 1000) },
+  )
 }

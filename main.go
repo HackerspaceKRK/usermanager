@@ -52,7 +52,7 @@ func main() {
 	cache := &userCache{}
 	app.Get("/api/local/cached-users", handleCachedUsers(cache, authentikURL))
 	app.Get("/api/local/summary", handleSummary(cache, authentikURL))
-	app.Get("/api/local/matrix-users", handleMatrixUsers(cache, authentikURL))
+	app.Get("/api/local/account-users", handleAccountUsers(cache, authentikURL))
 
 	// Proxy /api/v3/ to Authentik
 	app.All("/api/v3/*", func(c *fiber.Ctx) error {

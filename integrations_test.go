@@ -64,7 +64,7 @@ func TestComputeIntegrationStats(t *testing.T) {
 	}
 }
 
-func TestBuildMatrixUsers(t *testing.T) {
+func TestBuildAccountUsers(t *testing.T) {
 	users := []authentikUser{
 		user(1, "Zed", map[string]interface{}{"matrixHandles": []interface{}{"@z:x.y"}}),
 		user(2, "nohandles", map[string]interface{}{"telegramIDs": []interface{}{"1"}}),
@@ -74,25 +74,37 @@ func TestBuildMatrixUsers(t *testing.T) {
 			"matrixInviteRequests": []interface{}{map[string]interface{}{"handle": "@a:x.y"}},
 		}),
 	}
-	got := buildMatrixUsers(users)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 users with Matrix accounts, got %d", len(got))
+	users = append(users,
+		user(4, "tg-only", map[string]interface{}{"telegramIDs": "288245411, 111111111"}),
+		user(5, "pending-only", map[string]interface{}{"telegramUsername": "@jan_tg"}),
+		user(6, "nothing", map[string]interface{}{"mifareCardId": []interface{}{"x"}}),
+	)
+	got := buildAccountUsers(users)
+	names := []string{}
+	for _, g := range got {
+		names = append(names, g.Username)
 	}
-	if got[0].Username != "alice" || got[1].Username != "Zed" {
-		t.Fatalf("expected case-insensitive sort by username, got %q, %q", got[0].Username, got[1].Username)
+	// Anyone with a Matrix handle, a Telegram ID or a pending Telegram @username; sorted case-insensitively.
+	if !reflect.DeepEqual(names, []string{"alice", "nohandles", "pending-only", "tg-only", "Zed"}) {
+		t.Fatalf("unexpected users on the Invitations page: %v", names)
+	}
+	for _, g := range got {
+		if g.MatrixHandles == nil {
+			t.Fatalf("matrixHandles must be [] (not null) for %s", g.Username)
+		}
 	}
 	if got[0].MatrixAccounts == nil || got[0].MatrixInviteRequests == nil {
 		t.Fatalf("bot attributes must be passed through to the UI: %+v", got[0])
 	}
-	if got[1].TelegramIDs == nil {
+	if got[4].TelegramIDs == nil {
 		t.Fatalf("telegramIDs must be [] (not null) in JSON")
 	}
-	if _, err := json.Marshal(matrixUsersResponse{Users: got}); err != nil {
+	if _, err := json.Marshal(accountUsersResponse{Users: got}); err != nil {
 		t.Fatalf("response must be JSON serializable: %v", err)
 	}
 }
 
-func TestMatrixUsersEndpointAndSummary(t *testing.T) {
+func TestAccountUsersEndpointAndSummary(t *testing.T) {
 	authentik := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
 			w.WriteHeader(http.StatusForbidden)
@@ -113,7 +125,7 @@ func TestMatrixUsersEndpointAndSummary(t *testing.T) {
 
 	app := fiber.New()
 	cache := &userCache{}
-	app.Get("/api/local/matrix-users", handleMatrixUsers(cache, authentik.URL))
+	app.Get("/api/local/account-users", handleAccountUsers(cache, authentik.URL))
 	app.Get("/api/local/summary", handleSummary(cache, authentik.URL))
 
 	call := func(path, token string, out interface{}) int {
@@ -134,19 +146,19 @@ func TestMatrixUsersEndpointAndSummary(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	if code := call("/api/local/matrix-users", "", nil); code != http.StatusUnauthorized {
+	if code := call("/api/local/account-users", "", nil); code != http.StatusUnauthorized {
 		t.Fatalf("missing token must be 401, got %d", code)
 	}
-	if code := call("/api/local/matrix-users", "wrong", nil); code != http.StatusForbidden {
+	if code := call("/api/local/account-users", "wrong", nil); code != http.StatusForbidden {
 		t.Fatalf("Authentik rejection must be passed through, got %d", code)
 	}
 
-	var mu matrixUsersResponse
-	if code := call("/api/local/matrix-users", "tok", &mu); code != http.StatusOK {
+	var mu accountUsersResponse
+	if code := call("/api/local/account-users", "tok", &mu); code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
 	if len(mu.Users) != 1 || mu.Users[0].Username != "bob" {
-		t.Fatalf("only users with Matrix accounts expected, got %+v", mu.Users)
+		t.Fatalf("only users with messenger accounts expected, got %+v", mu.Users)
 	}
 	if !reflect.DeepEqual(mu.Users[0].TelegramIDs, []string{"288245411", "111111111"}) {
 		t.Fatalf("telegramIDs stored as a string must be split: %v", mu.Users[0].TelegramIDs)

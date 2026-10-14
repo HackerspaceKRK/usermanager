@@ -21,6 +21,7 @@ import (
 //   telegramIDs         list of Telegram numeric IDs (several per user are allowed)
 //   telegramUsername    a pending request, cleared by the bot once the account /start-ed it
 //   telegramStatus      last result reported by the bot
+//   telegramInviteRequests / telegramInviteResults   manual "send group invite links" queue and its outcomes
 
 var listSeparators = regexp.MustCompile(`[\s,;]+`)
 
@@ -129,8 +130,9 @@ func computeIntegrationStats(users []authentikUser) integrationStats {
 	return st
 }
 
-// matrixUser is one row of the Invitations page: a user that has Matrix accounts (or a queued invite).
-type matrixUser struct {
+// accountUser is one user on the Invitations page: anyone with at least one messenger account (a Matrix handle,
+// a Telegram ID or a pending Telegram @username). The page shows one row per account.
+type accountUser struct {
 	PK                   int         `json:"pk"`
 	Username             string      `json:"username"`
 	Name                 string      `json:"name"`
@@ -144,17 +146,23 @@ type matrixUser struct {
 	TelegramIDs          []string    `json:"telegramIDs"`
 	TelegramUsername     string      `json:"telegramUsername"`
 	TelegramStatus       string      `json:"telegramStatus"`
+	// Manual "send group links" queue for Telegram accounts and its outcomes (written by usermanager / the bot).
+	TelegramInviteRequests interface{} `json:"telegramInviteRequests"`
+	TelegramInviteResults  interface{} `json:"telegramInviteResults"`
 }
 
-func buildMatrixUsers(users []authentikUser) []matrixUser {
-	out := []matrixUser{}
+func buildAccountUsers(users []authentikUser) []accountUser {
+	out := []accountUser{}
 	for i := range users {
 		u := &users[i]
 		handles := matrixHandlesOf(u)
-		if len(handles) == 0 {
+		if len(handles) == 0 && len(telegramIDsOf(u)) == 0 && attrString(u, "telegramUsername") == "" {
 			continue
 		}
-		mu := matrixUser{
+		if handles == nil {
+			handles = []string{}
+		}
+		mu := accountUser{
 			PK:               u.PK,
 			Username:         u.Username,
 			Name:             u.Name,
@@ -173,6 +181,8 @@ func buildMatrixUsers(users []authentikUser) []matrixUser {
 			mu.MatrixAccounts = u.Attributes["matrixAccounts"]
 			mu.MatrixInviteRequests = u.Attributes["matrixInviteRequests"]
 			mu.MatrixInviteResults = u.Attributes["matrixInviteResults"]
+			mu.TelegramInviteRequests = u.Attributes["telegramInviteRequests"]
+			mu.TelegramInviteResults = u.Attributes["telegramInviteResults"]
 		}
 		out = append(out, mu)
 	}
@@ -182,14 +192,14 @@ func buildMatrixUsers(users []authentikUser) []matrixUser {
 	return out
 }
 
-type matrixUsersResponse struct {
+type accountUsersResponse struct {
 	Stats integrationStats `json:"stats"`
-	Users []matrixUser     `json:"users"`
+	Users []accountUser    `json:"users"`
 }
 
-// handleMatrixUsers serves GET /api/local/matrix-users from the shared user cache.
+// handleAccountUsers serves GET /api/local/account-users from the shared user cache.
 // The cache is invalidated whenever any user's last_updated moves (the bot's writes do that).
-func handleMatrixUsers(cache *userCache, authentikURL string) fiber.Handler {
+func handleAccountUsers(cache *userCache, authentikURL string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		token := extractToken(c.Get("Authorization"))
 		if token == "" {
@@ -199,9 +209,9 @@ func handleMatrixUsers(cache *userCache, authentikURL string) fiber.Handler {
 		if err != nil {
 			return handleCacheError(c, err)
 		}
-		return c.JSON(matrixUsersResponse{
+		return c.JSON(accountUsersResponse{
 			Stats: computeIntegrationStats(users),
-			Users: buildMatrixUsers(users),
+			Users: buildAccountUsers(users),
 		})
 	}
 }

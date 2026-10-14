@@ -134,3 +134,19 @@ export function MessengersCell({
     </div>
   )
 }
+
+/** State of a single Telegram account row on the Invitations page. */
+export function TelegramAccountBadge({ pending }: { pending: boolean }) {
+  if (pending) {
+    return (
+      <Badge variant="outline" className={WARN} title="Waiting for this Telegram account to send /start to the bot">
+        Waiting for /start
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="outline" className={OK} title="Listed in telegramIDs">
+      Linked
+    </Badge>
+  )
+}
