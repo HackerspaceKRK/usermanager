@@ -266,8 +266,18 @@ export interface SummaryUser {
 }
 
 export interface IntegrationStats {
-  matrix: { users: number; accounts: number; healthy: number; problems: number; unprocessed: number }
-  telegram: { users: number; accounts: number; pending: number }
+  // People vs accounts: a person with two Matrix accounts and one Telegram account is 1 person and 3 accounts.
+  overall: { people: number; accounts: number; multiPeople: number; multiAccounts: number }
+  matrix: {
+    users: number
+    accounts: number
+    multiUsers: number // users with 2+ Matrix accounts
+    multiAccounts: number // accounts held by those users together
+    healthy: number
+    problems: number
+    unprocessed: number
+  }
+  telegram: { users: number; accounts: number; multiUsers: number; multiAccounts: number; pending: number }
 }
 
 export interface Summary {

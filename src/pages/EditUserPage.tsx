@@ -39,6 +39,16 @@ const TZ = "Europe/Warsaw"
 const MXID_RE = /^@[^\s:@]+:[^\s:@]+$/
 
 /**
+ * Matrix user names are case-sensitive (@Jan:x and @jan:x are different accounts), so only the server part (a DNS
+ * name) is lowercased; the user name stays exactly as typed. Matches the bot's normalization.
+ */
+function normalizeMxid(handle: string): string {
+  const h = handle.trim()
+  const i = h.indexOf(":")
+  return i < 0 ? h : h.slice(0, i) + ":" + h.slice(i + 1).toLowerCase()
+}
+
+/**
  * Authentik replaces the WHOLE `attributes` object on PATCH. Start from the attributes loaded with the user and
  * overwrite only the keys this form manages (`undefined` removes a key); otherwise every other attribute
  * (matrixHandles, bot statuses, Authentik's own settings, ...) is silently wiped on save.
@@ -216,7 +226,7 @@ export function EditUserPage() {
     setSaving(true)
     setSaveError(null)
 
-    const cleanedHandles = [...new Set(matrixHandles.map((h) => h.trim().toLowerCase()).filter(Boolean))]
+    const cleanedHandles = [...new Set(matrixHandles.map(normalizeMxid).filter(Boolean))]
     const attributes = mergeAttributes(baseAttributes, {
       bankAccountNumber: bankAccounts.filter(Boolean),
       membershipExpirationTimestamp: membershipDate
@@ -495,7 +505,7 @@ export function EditUserPage() {
                       }}
                     />
                     {!isNew && v.trim() && (
-                      <MatrixAccountBadge account={baseAttributes.matrixAccounts?.[v.trim().toLowerCase()]} />
+                      <MatrixAccountBadge account={baseAttributes.matrixAccounts?.[normalizeMxid(v)]} />
                     )}
                   </div>
                 </ListRow>

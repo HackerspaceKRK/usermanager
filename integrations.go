@@ -85,20 +85,34 @@ func telegramIDsOf(u *authentikUser) []string {
 }
 
 type matrixStats struct {
-	Users       int `json:"users"`       // users with at least one Matrix account
-	Accounts    int `json:"accounts"`    // all Matrix accounts
-	Healthy     int `json:"healthy"`     // matrixStatus == "ok"
-	Problems    int `json:"problems"`    // matrixStatus is a problem description
-	Unprocessed int `json:"unprocessed"` // no matrixStatus yet (the bot has not seen the user)
+	Users         int `json:"users"`         // users with at least one Matrix account
+	Accounts      int `json:"accounts"`      // all Matrix accounts
+	MultiUsers    int `json:"multiUsers"`    // users with two or more Matrix accounts
+	MultiAccounts int `json:"multiAccounts"` // how many Matrix accounts those users hold together
+	Healthy       int `json:"healthy"`       // matrixStatus == "ok"
+	Problems      int `json:"problems"`      // matrixStatus is a problem description
+	Unprocessed   int `json:"unprocessed"`   // no matrixStatus yet (the bot has not seen the user)
 }
 
 type telegramStats struct {
-	Users    int `json:"users"`    // users with at least one Telegram account
-	Accounts int `json:"accounts"` // all Telegram accounts
-	Pending  int `json:"pending"`  // telegramUsername set: waiting for the user to /start the bot
+	Users         int `json:"users"`         // users with at least one Telegram account
+	Accounts      int `json:"accounts"`      // all Telegram accounts
+	MultiUsers    int `json:"multiUsers"`    // users with two or more Telegram accounts
+	MultiAccounts int `json:"multiAccounts"` // how many Telegram accounts those users hold together
+	Pending       int `json:"pending"`       // telegramUsername set: waiting for the user to /start the bot
+}
+
+// overallStats counts people across messengers, so "how many people" and "how many accounts" are not mixed up:
+// a person with two Matrix accounts and one Telegram account is one person and three accounts.
+type overallStats struct {
+	People        int `json:"people"`        // users with at least one account in any messenger
+	Accounts      int `json:"accounts"`      // all Matrix + Telegram accounts
+	MultiPeople   int `json:"multiPeople"`   // users with two or more accounts (any messengers)
+	MultiAccounts int `json:"multiAccounts"` // how many accounts those users hold together
 }
 
 type integrationStats struct {
+	Overall  overallStats  `json:"overall"`
 	Matrix   matrixStats   `json:"matrix"`
 	Telegram telegramStats `json:"telegram"`
 }
@@ -107,9 +121,22 @@ func computeIntegrationStats(users []authentikUser) integrationStats {
 	var st integrationStats
 	for i := range users {
 		u := &users[i]
-		if handles := matrixHandlesOf(u); len(handles) > 0 {
+		handles, ids := matrixHandlesOf(u), telegramIDsOf(u)
+		if total := len(handles) + len(ids); total > 0 {
+			st.Overall.People++
+			st.Overall.Accounts += total
+			if total >= 2 {
+				st.Overall.MultiPeople++
+				st.Overall.MultiAccounts += total
+			}
+		}
+		if len(handles) > 0 {
 			st.Matrix.Users++
 			st.Matrix.Accounts += len(handles)
+			if len(handles) >= 2 {
+				st.Matrix.MultiUsers++
+				st.Matrix.MultiAccounts += len(handles)
+			}
 			switch status := attrString(u, "matrixStatus"); {
 			case status == "":
 				st.Matrix.Unprocessed++
@@ -119,9 +146,13 @@ func computeIntegrationStats(users []authentikUser) integrationStats {
 				st.Matrix.Problems++
 			}
 		}
-		if ids := telegramIDsOf(u); len(ids) > 0 {
+		if len(ids) > 0 {
 			st.Telegram.Users++
 			st.Telegram.Accounts += len(ids)
+			if len(ids) >= 2 {
+				st.Telegram.MultiUsers++
+				st.Telegram.MultiAccounts += len(ids)
+			}
 		}
 		if attrString(u, "telegramUsername") != "" {
 			st.Telegram.Pending++

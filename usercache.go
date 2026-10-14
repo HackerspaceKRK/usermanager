@@ -60,39 +60,55 @@ type userCache struct {
 	mu       sync.Mutex
 	users    []authentikUser
 	cachedAt time.Time
+	// newest is the latest last_updated among the cached users. Changes are detected by comparing Authentik's own
+	// timestamps with each other, never with this server's clock (which may differ or jump).
+	newest time.Time
 }
 
 func (c *userCache) get(token, authentikURL string) ([]authentikUser, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	cacheValid := len(c.users) > 0 && time.Since(c.cachedAt) < cacheTTL
+	valid := len(c.users) > 0 && time.Since(c.cachedAt) < cacheTTL
 
-	if cacheValid {
-		// Validate token and detect changes in one request
+	if valid {
+		// Validate token and detect changes in one request: is the most recently updated user newer than
+		// anything we cached? If the timestamp is missing or unparsable we cannot tell, so we refetch.
 		page1, err := fetchUsersPage(token, authentikURL, 1, 1, "-last_updated")
 		if err != nil {
 			return nil, err
 		}
 		if len(page1.Results) > 0 {
-			if t, err := time.Parse(time.RFC3339, page1.Results[0].LastUpdated); err == nil {
-				if t.After(c.cachedAt) {
-					c.users = nil // something changed, invalidate
-				}
+			t, perr := time.Parse(time.RFC3339, page1.Results[0].LastUpdated)
+			if perr != nil || t.After(c.newest) {
+				valid = false // something changed (or cannot be verified)
 			}
 		}
 	}
 
-	if len(c.users) == 0 {
+	if !valid {
+		// Cache missing, older than cacheTTL, or invalidated above. (This used to be guarded by len(c.users) == 0,
+		// which is never true once the cache has been filled, so after cacheTTL it was never refreshed again.)
 		all, err := fetchAllUsers(token, authentikURL)
 		if err != nil {
 			return nil, err
 		}
 		c.users = all
 		c.cachedAt = time.Now()
+		c.newest = newestUpdate(all)
 	}
 
 	return c.users, nil
+}
+
+func newestUpdate(users []authentikUser) time.Time {
+	var newest time.Time
+	for i := range users {
+		if t, err := time.Parse(time.RFC3339, users[i].LastUpdated); err == nil && t.After(newest) {
+			newest = t
+		}
+	}
+	return newest
 }
 
 func fetchUsersPage(token, authentikURL string, page, pageSize int, ordering string) (*authentikUserList, error) {

@@ -205,7 +205,21 @@ export function InvitationsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border bg-card p-5 space-y-1">
+          <div className="text-sm font-medium text-muted-foreground">People with an account</div>
+          {loading || !stats ? (
+            <Skeleton className="h-8 w-24" />
+          ) : (
+            <>
+              <div className="text-3xl font-bold">{stats.overall.people} people</div>
+              <div className="text-sm text-muted-foreground">
+                {stats.overall.accounts} accounts in total. {stats.overall.multiPeople} of those people have several
+                accounts ({stats.overall.multiAccounts} accounts together).
+              </div>
+            </>
+          )}
+        </div>
         <div className="rounded-xl border bg-card p-5 space-y-1">
           <div className="text-sm font-medium text-muted-foreground">Matrix</div>
           {loading || !stats ? (
@@ -214,7 +228,11 @@ export function InvitationsPage() {
             <>
               <div className="text-3xl font-bold">{stats.matrix.users} users</div>
               <div className="text-sm text-muted-foreground">
-                {stats.matrix.accounts} accounts · {stats.matrix.healthy} OK ·{" "}
+                {stats.matrix.accounts} accounts, {stats.matrix.multiUsers} users with several (
+                {stats.matrix.multiAccounts} accounts)
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {stats.matrix.healthy} OK ·{" "}
                 <span className={stats.matrix.problems > 0 ? "text-amber-600 dark:text-amber-400" : ""}>
                   {stats.matrix.problems} with problems
                 </span>
@@ -231,8 +249,10 @@ export function InvitationsPage() {
             <>
               <div className="text-3xl font-bold">{stats.telegram.users} users</div>
               <div className="text-sm text-muted-foreground">
-                {stats.telegram.accounts} accounts · {stats.telegram.pending} waiting for /start
+                {stats.telegram.accounts} accounts, {stats.telegram.multiUsers} users with several (
+                {stats.telegram.multiAccounts} accounts)
               </div>
+              <div className="text-sm text-muted-foreground">{stats.telegram.pending} waiting for /start</div>
             </>
           )}
         </div>
