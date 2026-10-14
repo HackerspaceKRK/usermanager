@@ -223,14 +223,13 @@ export function InvitationsPage() {
               <TableHead className="font-bold">State</TableHead>
               <TableHead className="font-bold">Last manual invite</TableHead>
               <TableHead className="font-bold text-right">Action</TableHead>
-              <TableHead className="font-bold">Telegram</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 6 }).map((__, j) => (
+                  {Array.from({ length: 5 }).map((__, j) => (
                     <TableCell key={j}>
                       <Skeleton className="h-8 w-full" />
                     </TableCell>
@@ -239,7 +238,7 @@ export function InvitationsPage() {
               ))
             ) : users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                   {data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix accounts yet."}
                 </TableCell>
               </TableRow>
@@ -255,7 +254,7 @@ export function InvitationsPage() {
                     <TableRow key={key} className={i === 0 ? "border-t-2" : undefined}>
                       {i === 0 && (
                         <TableCell rowSpan={u.matrixHandles.length} className="align-top">
-                          <div className="flex items-center gap-3 min-w-40">
+                          <div className="flex items-center gap-3 min-w-40 max-w-56">
                             <Avatar>
                               <AvatarImage src={u.avatar} alt={u.name} />
                               <AvatarFallback>{initials(u.name, u.username)}</AvatarFallback>
@@ -268,6 +267,16 @@ export function InvitationsPage() {
                               {u.name !== u.username && (
                                 <div className="text-xs text-muted-foreground leading-tight mt-0.5">{u.name}</div>
                               )}
+                              {(u.telegramIDs.length > 0 || u.telegramUsername || u.telegramStatus) && (
+                                <div className="mt-1.5 flex items-start gap-1.5">
+                                  <span className="pt-0.5 text-xs text-muted-foreground">Telegram</span>
+                                  <TelegramStatusBadge
+                                    ids={u.telegramIDs}
+                                    username={u.telegramUsername}
+                                    status={u.telegramStatus}
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
                         </TableCell>
@@ -276,10 +285,10 @@ export function InvitationsPage() {
                       <TableCell>
                         <MatrixAccountBadge account={u.matrixAccounts?.[handle]} />
                       </TableCell>
-                      <TableCell className="text-sm max-w-72">
+                      <TableCell className="text-sm max-w-52">
                         {result ? (
                           <div title={result.result}>
-                            <div className={`truncate ${ok ? "" : "text-destructive"}`}>{result.result}</div>
+                            <div className={`line-clamp-2 break-words ${ok ? "" : "text-destructive"}`}>{result.result}</div>
                             <div className="text-xs text-muted-foreground">
                               {formatDistanceToNow(new Date(result.ts * 1000), { addSuffix: true })} ·{" "}
                               {format(new Date(result.ts * 1000), "yyyy-MM-dd HH:mm")} · by {result.by}
@@ -300,15 +309,6 @@ export function InvitationsPage() {
                           {queued ? "Queued…" : "Invite"}
                         </Button>
                       </TableCell>
-                      {i === 0 && (
-                        <TableCell rowSpan={u.matrixHandles.length} className="align-top">
-                          <TelegramStatusBadge
-                            ids={u.telegramIDs}
-                            username={u.telegramUsername}
-                            status={u.telegramStatus}
-                          />
-                        </TableCell>
-                      )}
                     </TableRow>
                   )
                 }),

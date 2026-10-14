@@ -6,6 +6,7 @@ const INFO = "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:tex
 const WARN = "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800"
 const BAD = "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800"
 const MUTED = "bg-muted text-muted-foreground"
+const SHOWN_IDS = 3 // Telegram IDs listed in a cell; the rest collapses into "+N" (full list in the tooltip)
 
 const ACCOUNT_STATES: Record<MatrixAccountState, { label: string; className: string }> = {
   joined: { label: "Joined", className: OK },
@@ -75,9 +76,14 @@ export function TelegramStatusBadge({
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {ids.length > 0 && (
-        <Badge variant="outline" className={OK}>
-          {ids.length} account{ids.length === 1 ? "" : "s"}
+      {ids.slice(0, SHOWN_IDS).map((id) => (
+        <Badge key={id} variant="outline" className={`${OK} font-mono`} title="Telegram ID">
+          {id}
+        </Badge>
+      ))}
+      {ids.length > SHOWN_IDS && (
+        <Badge variant="outline" className={MUTED} title={ids.slice(SHOWN_IDS).join(", ")}>
+          +{ids.length - SHOWN_IDS}
         </Badge>
       )}
       {username && (
@@ -97,4 +103,34 @@ export function TelegramStatusBadge({
 /** True for account states that need an admin's attention. */
 export function isProblemState(state: MatrixAccountState | undefined): boolean {
   return state !== "joined" && state !== "invited"
+}
+
+/** Matrix and Telegram stacked in one compact cell (keeps the Users table narrow enough to show both). */
+export function MessengersCell({
+  handles,
+  matrixStatus,
+  telegramIds,
+  telegramUsername,
+  telegramStatus,
+}: {
+  handles: string[]
+  matrixStatus?: string
+  telegramIds: string[]
+  telegramUsername?: string
+  telegramStatus?: string
+}) {
+  const none = handles.length === 0 && telegramIds.length === 0 && !telegramUsername && !telegramStatus
+  if (none) return <span className="text-muted-foreground text-sm">—</span>
+  return (
+    <div className="space-y-1 max-w-64">
+      <div className="flex items-center gap-1.5">
+        <span className="w-16 shrink-0 text-xs text-muted-foreground">Matrix</span>
+        <MatrixStatusBadge handles={handles} status={matrixStatus} />
+      </div>
+      <div className="flex items-start gap-1.5">
+        <span className="w-16 shrink-0 pt-0.5 text-xs text-muted-foreground">Telegram</span>
+        <TelegramStatusBadge ids={telegramIds} username={telegramUsername} status={telegramStatus} />
+      </div>
+    </div>
+  )
 }

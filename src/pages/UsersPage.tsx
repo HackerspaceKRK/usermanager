@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/table"
 import { PageLayout } from "@/components/PageLayout"
 import { MembershipBadge } from "@/components/MembershipBadge"
-import { MatrixStatusBadge, TelegramStatusBadge } from "@/components/IntegrationBadges"
+import { MessengersCell } from "@/components/IntegrationBadges"
 
 const VISIBILITY_KEY = "usermanager-column-visibility"
 const PAGE_SIZE = 20
@@ -74,8 +74,7 @@ const COLUMN_LABELS: Record<string, string> = {
   mifareCardId: "Mifare IDs",
   bankAccountNumber: "Bank Account",
   telegramIDs: "Telegram IDs",
-  matrixStatus: "Matrix",
-  telegramStatus: "Telegram",
+  messengers: "Matrix / Telegram",
   created_at: "Created At",
 }
 
@@ -365,6 +364,21 @@ export function UsersPage() {
       },
     },
     {
+      id: "messengers",
+      header: () => <span className="font-bold">Matrix / Telegram</span>,
+      enableHiding: true,
+      enableSorting: false,
+      cell: ({ row }) => (
+        <MessengersCell
+          handles={listAttr(row.original.attributes.matrixHandles)}
+          matrixStatus={row.original.attributes.matrixStatus}
+          telegramIds={listAttr(row.original.attributes.telegramIDs)}
+          telegramUsername={row.original.attributes.telegramUsername}
+          telegramStatus={row.original.attributes.telegramStatus}
+        />
+      ),
+    },
+    {
       id: "email",
       header: ({ column }) => (
         <SortHeader
@@ -511,31 +525,6 @@ export function UsersPage() {
           </div>
         )
       },
-    },
-    {
-      id: "matrixStatus",
-      header: () => <span className="font-bold">Matrix</span>,
-      enableHiding: true,
-      enableSorting: false,
-      cell: ({ row }) => (
-        <MatrixStatusBadge
-          handles={listAttr(row.original.attributes.matrixHandles)}
-          status={row.original.attributes.matrixStatus}
-        />
-      ),
-    },
-    {
-      id: "telegramStatus",
-      header: () => <span className="font-bold">Telegram</span>,
-      enableHiding: true,
-      enableSorting: false,
-      cell: ({ row }) => (
-        <TelegramStatusBadge
-          ids={listAttr(row.original.attributes.telegramIDs)}
-          username={row.original.attributes.telegramUsername}
-          status={row.original.attributes.telegramStatus}
-        />
-      ),
     },
     {
       id: "created_at",
