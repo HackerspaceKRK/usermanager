@@ -87,6 +87,22 @@ function parseWaitingKey(key: string): { pk: string; kind: string; id: string } 
   return { pk, kind, id: rest.join(":") }
 }
 
+function renderKind(row: AccountRow) {
+  return (
+    <Badge variant="secondary" className="text-[10px] uppercase tracking-wide shrink-0">
+      {row.kind === "matrix" ? "Matrix" : "Telegram"}
+    </Badge>
+  )
+}
+
+function renderState(u: AccountUser, row: AccountRow) {
+  return row.kind === "matrix" ? (
+    <MatrixAccountBadge account={u.matrixAccounts?.[row.id]} />
+  ) : (
+    <TelegramAccountBadge pending={row.pendingUsername} />
+  )
+}
+
 export function InvitationsPage() {
   const { token } = useAuth()
   const me = useMe(token)
@@ -187,6 +203,82 @@ export function InvitationsPage() {
     })
   }, [data, search, onlyProblems])
 
+  // Shared by the table (lg and up) and the cards (phones and tablets), so the invite logic lives in one place.
+  function renderUserInfo(u: AccountUser) {
+    return (
+      <>
+        <Avatar>
+          <AvatarImage src={u.avatar} alt={u.name} />
+          <AvatarFallback>{initials(u.name, u.username)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <Link to={`/users/edit/${u.pk}`} className="font-medium leading-tight hover:underline">
+            {u.username}
+          </Link>
+          {!u.isActive && <div className="text-xs text-muted-foreground">inactive</div>}
+          {u.name !== u.username && <div className="text-xs text-muted-foreground leading-tight mt-0.5">{u.name}</div>}
+          {u.matrixStatus && u.matrixStatus !== "ok" && (
+            <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 line-clamp-2" title={u.matrixStatus}>
+              Matrix: {u.matrixStatus}
+            </div>
+          )}
+          {u.telegramStatus && u.telegramStatus !== "ok" && (
+            <div className="mt-1 text-xs text-destructive line-clamp-2" title={u.telegramStatus}>
+              Telegram: {u.telegramStatus}
+            </div>
+          )}
+        </div>
+      </>
+    )
+  }
+
+  function renderLast(u: AccountUser, row: AccountRow) {
+    const result = lastResult(u, row)
+    if (!result) return <span className="text-muted-foreground">—</span>
+    const ok = result.result.startsWith("ok")
+    return (
+      <div title={result.result}>
+        <div className={`line-clamp-2 break-words ${ok ? "" : "text-destructive"}`}>{result.result}</div>
+        <div className="text-xs text-muted-foreground">
+          {formatDistanceToNow(new Date(result.ts * 1000), { addSuffix: true })} ·{" "}
+          {format(new Date(result.ts * 1000), "yyyy-MM-dd HH:mm")} · by {result.by}
+        </div>
+      </div>
+    )
+  }
+
+  function renderAction(u: AccountUser, row: AccountRow) {
+    if (row.pendingUsername) {
+      return (
+        <span className="text-xs text-muted-foreground" title="Nothing to invite yet: this account has to send /start to the bot first">
+          —
+        </span>
+      )
+    }
+    const key = `${u.pk}:${row.key}`
+    const queued = key in waiting || isQueued(u, row)
+    const busy = !!sending[key]
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!me || busy || queued}
+        title={
+          row.kind === "matrix"
+            ? "Invite this account to every configured room and space"
+            : "Send fresh one-time group invite links to this account in a DM"
+        }
+        onClick={() => void invite(u, row)}
+      >
+        {busy || queued ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
+        {queued ? "Queued…" : "Invite"}
+      </Button>
+    )
+  }
+
+  const emptyText =
+    data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix or Telegram accounts yet."
+
   const stats = data?.stats
 
   return (
@@ -285,7 +377,39 @@ export function InvitationsPage() {
         picks the request up within about a minute and reports the result here.
       </p>
 
-      <div className="rounded-md border overflow-x-auto">
+      {/* Below ~1000px: one card per user (the table needs ~880px; narrower, the Invite button would be off-screen). */}
+      <div className="lg:hidden space-y-3">
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-32 w-full rounded-xl" />)
+        ) : users.length === 0 ? (
+          <div className="rounded-md border py-12 text-center text-muted-foreground">{emptyText}</div>
+        ) : (
+          users.map((u) => (
+            <div key={u.pk} className="rounded-xl border bg-card p-4 space-y-2">
+              <div className="flex items-start gap-3">{renderUserInfo(u)}</div>
+              <div className="divide-y">
+                {accountRows(u).map((row) => (
+                  <div key={row.key} className="py-2.5 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {renderKind(row)}
+                        <span className="font-mono text-sm break-all">{row.id}</span>
+                      </div>
+                      <div className="shrink-0">{renderState(u, row)}</div>
+                    </div>
+                    <div className="flex items-end justify-between gap-2">
+                      <div className="text-sm min-w-0">{renderLast(u, row)}</div>
+                      <div className="shrink-0">{renderAction(u, row)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="hidden lg:block rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -310,102 +434,31 @@ export function InvitationsPage() {
             ) : users.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
-                  {data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix or Telegram accounts yet."}
+                  {emptyText}
                 </TableCell>
               </TableRow>
             ) : (
               users.map((u) => {
                 const rows = accountRows(u)
-                return rows.map((row, i) => {
-                  const key = `${u.pk}:${row.key}`
-                  const queued = key in waiting || isQueued(u, row)
-                  const busy = !!sending[key]
-                  const result = lastResult(u, row)
-                  const ok = result?.result.startsWith("ok")
-                  return (
-                    <TableRow key={key} className={i === 0 ? "border-t-2" : undefined}>
-                      {i === 0 && (
-                        <TableCell rowSpan={rows.length} className="align-top">
-                          <div className="flex items-start gap-3 min-w-40 max-w-56">
-                            <Avatar>
-                              <AvatarImage src={u.avatar} alt={u.name} />
-                              <AvatarFallback>{initials(u.name, u.username)}</AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0">
-                              <Link to={`/users/edit/${u.pk}`} className="font-medium leading-tight hover:underline">
-                                {u.username}
-                              </Link>
-                              {!u.isActive && <div className="text-xs text-muted-foreground">inactive</div>}
-                              {u.name !== u.username && (
-                                <div className="text-xs text-muted-foreground leading-tight mt-0.5">{u.name}</div>
-                              )}
-                              {u.matrixStatus && u.matrixStatus !== "ok" && (
-                                <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 line-clamp-2" title={u.matrixStatus}>
-                                  Matrix: {u.matrixStatus}
-                                </div>
-                              )}
-                              {u.telegramStatus && u.telegramStatus !== "ok" && (
-                                <div className="mt-1 text-xs text-destructive line-clamp-2" title={u.telegramStatus}>
-                                  Telegram: {u.telegramStatus}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                      )}
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-                            {row.kind === "matrix" ? "Matrix" : "Telegram"}
-                          </Badge>
-                          <span className="font-mono text-sm break-all">{row.id}</span>
-                        </div>
+                return rows.map((row, i) => (
+                  <TableRow key={`${u.pk}:${row.key}`} className={i === 0 ? "border-t-2" : undefined}>
+                    {i === 0 && (
+                      <TableCell rowSpan={rows.length} className="align-top">
+                        <div className="flex items-start gap-3 min-w-40 max-w-56">{renderUserInfo(u)}</div>
                       </TableCell>
-                      <TableCell>
-                        {row.kind === "matrix" ? (
-                          <MatrixAccountBadge account={u.matrixAccounts?.[row.id]} />
-                        ) : (
-                          <TelegramAccountBadge pending={row.pendingUsername} />
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm max-w-52">
-                        {result ? (
-                          <div title={result.result}>
-                            <div className={`line-clamp-2 break-words ${ok ? "" : "text-destructive"}`}>{result.result}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(result.ts * 1000), { addSuffix: true })} ·{" "}
-                              {format(new Date(result.ts * 1000), "yyyy-MM-dd HH:mm")} · by {result.by}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.pendingUsername ? (
-                          <span className="text-xs text-muted-foreground" title="Nothing to invite yet: this account has to send /start to the bot first">
-                            —
-                          </span>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={!me || busy || queued}
-                            title={
-                              row.kind === "matrix"
-                                ? "Invite this account to every configured room and space"
-                                : "Send fresh one-time group invite links to this account in a DM"
-                            }
-                            onClick={() => void invite(u, row)}
-                          >
-                            {busy || queued ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
-                            {queued ? "Queued…" : "Invite"}
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })
+                    )}
+                    <TableCell>
+                      {/* nowrap: an account ID must never be squeezed into one-character lines */}
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        {renderKind(row)}
+                        <span className="font-mono text-sm">{row.id}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{renderState(u, row)}</TableCell>
+                    <TableCell className="text-sm max-w-52">{renderLast(u, row)}</TableCell>
+                    <TableCell className="text-right">{renderAction(u, row)}</TableCell>
+                  </TableRow>
+                ))
               })
             )}
           </TableBody>
