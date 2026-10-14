@@ -267,7 +267,16 @@ export interface SummaryUser {
 
 export interface IntegrationStats {
   // People vs accounts: a person with two Matrix accounts and one Telegram account is 1 person and 3 accounts.
-  overall: { people: number; accounts: number; multiPeople: number; multiAccounts: number }
+  overall: {
+    people: number
+    accounts: number
+    multiPeople: number
+    multiAccounts: number
+    // people by coverage; bothMessengers + onlyMatrix + onlyTelegram === people
+    bothMessengers: number
+    onlyMatrix: number
+    onlyTelegram: number
+  }
   matrix: {
     users: number
     accounts: number
@@ -341,13 +350,26 @@ export interface AccountUser {
   telegramIDs: string[]
   telegramUsername: string
   telegramStatus: string
+  // IDs that wrote to the bot (written by the bot); null = attribute absent (see telegramReachable in InvitationsPage)
+  telegramReachableIDs: string[] | null
   telegramInviteRequests: TelegramInviteRequest[] | null
   telegramInviteResults: TelegramInviteResult[] | null
+}
+
+/** An active member whose membership has not expired but who has no Matrix and no Telegram account. */
+export interface MissingUser {
+  pk: number
+  username: string
+  name: string
+  avatar: string
+  membershipTS: number
+  telegramUsername: string
 }
 
 export interface AccountUsersResponse {
   stats: IntegrationStats
   users: AccountUser[]
+  missing: MissingUser[]
 }
 
 /** Users with at least one messenger account (Matrix handle, Telegram ID or a pending Telegram @username). */

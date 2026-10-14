@@ -5,7 +5,7 @@ import { Loader2Icon, RefreshCwIcon, SearchIcon, SendIcon } from "lucide-react"
 import { useAuth } from "@/auth/AuthContext"
 import { useMe } from "@/hooks/useMe"
 import { listAccountUsers, requestMatrixInvite, requestTelegramInvite } from "@/api/authentik"
-import type { AccountUser, AccountUsersResponse } from "@/api/authentik"
+import type { AccountUser, AccountUsersResponse, MissingUser } from "@/api/authentik"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { MatrixAccountBadge, TelegramAccountBadge, isProblemState } from "@/components/IntegrationBadges"
+import { MembershipBadge } from "@/components/MembershipBadge"
 
 const POLL_MS = 5000 // how often we re-read while a manual invite is waiting for the bot
 const WAIT_TIMEOUT_S = 180 // stop waiting for the bot after this long
@@ -25,6 +26,8 @@ interface AccountRow {
   kind: AccountKind
   id: string // Matrix handle, Telegram ID, or the @username of a pending Telegram request
   pendingUsername: boolean // a Telegram @username that has not sent /start yet (nothing to invite)
+  // A Telegram ID with no trace of ever writing to the bot (typed in by hand): Telegram bots cannot message first.
+  unreachable: boolean
 }
 
 interface LastResult {
@@ -41,16 +44,30 @@ function initials(name: string, username: string): string {
   return (name[0] ?? username[0] ?? "?").toUpperCase()
 }
 
+/**
+ * Can the bot DM this Telegram ID? Only accounts that wrote to it (the bot records them in telegramReachableIDs).
+ * Accounts linked by the bot before that attribute existed have no list but do have telegramStatus: treat them as reachable.
+ * No list and no status = the ID was typed in by hand and never talked to the bot.
+ */
+function telegramReachable(u: AccountUser, id: string): boolean {
+  if (u.telegramReachableIDs != null) return u.telegramReachableIDs.includes(id)
+  return u.telegramStatus !== ""
+}
+
 function accountRows(u: AccountUser): AccountRow[] {
   const rows: AccountRow[] = u.matrixHandles.map((h) => ({
-    key: `matrix:${h}`, kind: "matrix", id: h, pendingUsername: false,
+    key: `matrix:${h}`, kind: "matrix", id: h, pendingUsername: false, unreachable: false,
   }))
   for (const id of u.telegramIDs) {
-    rows.push({ key: `telegram:${id}`, kind: "telegram", id, pendingUsername: false })
+    rows.push({
+      key: `telegram:${id}`, kind: "telegram", id, pendingUsername: false,
+      unreachable: !telegramReachable(u, id),
+    })
   }
   if (u.telegramUsername) {
     rows.push({
       key: `telegram-request:${u.telegramUsername}`, kind: "telegram", id: u.telegramUsername, pendingUsername: true,
+      unreachable: false,
     })
   }
   return rows
@@ -99,7 +116,7 @@ function renderState(u: AccountUser, row: AccountRow) {
   return row.kind === "matrix" ? (
     <MatrixAccountBadge account={u.matrixAccounts?.[row.id]} />
   ) : (
-    <TelegramAccountBadge pending={row.pendingUsername} />
+    <TelegramAccountBadge pending={row.pendingUsername} unreachable={row.unreachable} />
   )
 }
 
@@ -170,7 +187,7 @@ export function InvitationsPage() {
   }, [anyQueued, load])
 
   async function invite(u: AccountUser, row: AccountRow) {
-    if (!token || !me || row.pendingUsername) return
+    if (!token || !me || row.pendingUsername || row.unreachable) return
     const key = `${u.pk}:${row.key}`
     setSending((prev) => ({ ...prev, [key]: true }))
     setInviteError(null)
@@ -255,6 +272,16 @@ export function InvitationsPage() {
         </span>
       )
     }
+    if (row.unreachable) {
+      return (
+        <span
+          className="text-xs text-muted-foreground"
+          title="Telegram bots cannot message someone first: this account has to write to the bot (/start) before it can be invited"
+        >
+          —
+        </span>
+      )
+    }
     const key = `${u.pk}:${row.key}`
     const queued = key in waiting || isQueued(u, row)
     const busy = !!sending[key]
@@ -276,10 +303,38 @@ export function InvitationsPage() {
     )
   }
 
+  function renderMissing(m: MissingUser) {
+    return (
+      <li key={m.pk} className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar>
+            <AvatarImage src={m.avatar} alt={m.name} />
+            <AvatarFallback>{initials(m.name, m.username)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <Link to={`/users/edit/${m.pk}`} className="font-medium leading-tight hover:underline">
+              {m.username}
+            </Link>
+            {m.name !== m.username && <div className="text-xs text-muted-foreground leading-tight">{m.name}</div>}
+            {m.telegramUsername && (
+              <div className="text-xs text-muted-foreground">Telegram request: {m.telegramUsername}</div>
+            )}
+          </div>
+        </div>
+        <MembershipBadge ts={m.membershipTS} compact />
+      </li>
+    )
+  }
+
   const emptyText =
     data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix or Telegram accounts yet."
 
   const stats = data?.stats
+  const missing = data?.missing ?? []
+  const missingShown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return missing.filter((m) => !q || m.username.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+  }, [missing, search])
 
   return (
     <div className="space-y-6">
@@ -309,6 +364,15 @@ export function InvitationsPage() {
                 {stats.overall.accounts} accounts in total. {stats.overall.multiPeople} of those people have several
                 accounts ({stats.overall.multiAccounts} accounts together).
               </div>
+              <div className="text-sm text-muted-foreground">
+                {stats.overall.bothMessengers} on both · {stats.overall.onlyMatrix} only Matrix ·{" "}
+                {stats.overall.onlyTelegram} only Telegram
+              </div>
+              {missing.length > 0 && (
+                <div className="text-sm text-amber-600 dark:text-amber-400">
+                  {missing.length} active {missing.length === 1 ? "member has" : "members have"} neither
+                </div>
+              )}
             </>
           )}
         </div>
@@ -373,8 +437,9 @@ export function InvitationsPage() {
 
       <p className="text-xs text-muted-foreground">
         Invite on a Matrix account sends it to every configured room and space, ignoring an earlier decline. On a Telegram
-        account it sends fresh one-time group invite links in a DM (the account must have sent /start to the bot). The bot
-        picks the request up within about a minute and reports the result here.
+        account it sends fresh one-time group invite links in a DM: Telegram bots cannot message anyone first, so the
+        account must have sent /start to the bot (otherwise there is no Invite button). The bot picks the request up within
+        about a minute and reports the result here.
       </p>
 
       {/* Below ~1000px: one card per user (the table needs ~880px; narrower, the Invite button would be off-screen). */}
@@ -464,6 +529,21 @@ export function InvitationsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {!loading && missing.length > 0 && (
+        <details open className="rounded-xl border bg-card">
+          <summary className="cursor-pointer select-none px-4 py-3 font-medium">
+            Active members with no Matrix or Telegram account ({missingShown.length}
+            {missingShown.length !== missing.length ? ` of ${missing.length}` : ""})
+          </summary>
+          <p className="px-4 pb-2 text-xs text-muted-foreground">
+            Membership not expired, no matrixHandles and no telegramIDs. Open a user to add the accounts by hand.
+          </p>
+          <ul className="divide-y border-t">
+            {missingShown.map((m) => renderMissing(m))}
+          </ul>
+        </details>
+      )}
     </div>
   )
 }

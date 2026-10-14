@@ -136,7 +136,18 @@ export function MessengersCell({
 }
 
 /** State of a single Telegram account row on the Invitations page. */
-export function TelegramAccountBadge({ pending }: { pending: boolean }) {
+export function TelegramAccountBadge({ pending, unreachable }: { pending: boolean; unreachable?: boolean }) {
+  if (unreachable) {
+    return (
+      <Badge
+        variant="outline"
+        className={WARN}
+        title="Telegram bots cannot message someone first: no sign that this account ever wrote to the bot (the ID was probably typed in by hand). It becomes invitable after it sends /grupy to the bot"
+      >
+        Has not started the bot
+      </Badge>
+    )
+  }
   if (pending) {
     return (
       <Badge variant="outline" className={WARN} title="Waiting for this Telegram account to send /start to the bot">

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -21,6 +22,7 @@ import (
 //   telegramIDs         list of Telegram numeric IDs (several per user are allowed)
 //   telegramUsername    a pending request, cleared by the bot once the account /start-ed it
 //   telegramStatus      last result reported by the bot
+//   telegramReachableIDs  subset of telegramIDs that wrote to the bot (bot-written); Telegram bots cannot message first
 //   telegramInviteRequests / telegramInviteResults   manual "send group invite links" queue and its outcomes
 
 var listSeparators = regexp.MustCompile(`[\s,;]+`)
@@ -109,6 +111,10 @@ type overallStats struct {
 	Accounts      int `json:"accounts"`      // all Matrix + Telegram accounts
 	MultiPeople   int `json:"multiPeople"`   // users with two or more accounts (any messengers)
 	MultiAccounts int `json:"multiAccounts"` // how many accounts those users hold together
+	// Split of People by messenger coverage (BothMessengers + OnlyMatrix + OnlyTelegram == People).
+	BothMessengers int `json:"bothMessengers"`
+	OnlyMatrix     int `json:"onlyMatrix"`
+	OnlyTelegram   int `json:"onlyTelegram"`
 }
 
 type integrationStats struct {
@@ -123,6 +129,14 @@ func computeIntegrationStats(users []authentikUser) integrationStats {
 		u := &users[i]
 		handles, ids := matrixHandlesOf(u), telegramIDsOf(u)
 		if total := len(handles) + len(ids); total > 0 {
+			switch {
+			case len(handles) > 0 && len(ids) > 0:
+				st.Overall.BothMessengers++
+			case len(handles) > 0:
+				st.Overall.OnlyMatrix++
+			default:
+				st.Overall.OnlyTelegram++
+			}
 			st.Overall.People++
 			st.Overall.Accounts += total
 			if total >= 2 {
@@ -177,6 +191,8 @@ type accountUser struct {
 	TelegramIDs          []string    `json:"telegramIDs"`
 	TelegramUsername     string      `json:"telegramUsername"`
 	TelegramStatus       string      `json:"telegramStatus"`
+	// IDs that wrote to the bot (written by the bot); nil (JSON null) = attribute absent, the UI then falls back to telegramStatus.
+	TelegramReachableIDs []string `json:"telegramReachableIDs"`
 	// Manual "send group links" queue for Telegram accounts and its outcomes (written by usermanager / the bot).
 	TelegramInviteRequests interface{} `json:"telegramInviteRequests"`
 	TelegramInviteResults  interface{} `json:"telegramInviteResults"`
@@ -212,6 +228,12 @@ func buildAccountUsers(users []authentikUser) []accountUser {
 			mu.MatrixAccounts = u.Attributes["matrixAccounts"]
 			mu.MatrixInviteRequests = u.Attributes["matrixInviteRequests"]
 			mu.MatrixInviteResults = u.Attributes["matrixInviteResults"]
+			if _, ok := u.Attributes["telegramReachableIDs"]; ok {
+				mu.TelegramReachableIDs = attrStrings(u.Attributes["telegramReachableIDs"])
+				if mu.TelegramReachableIDs == nil {
+					mu.TelegramReachableIDs = []string{}
+				}
+			}
 			mu.TelegramInviteRequests = u.Attributes["telegramInviteRequests"]
 			mu.TelegramInviteResults = u.Attributes["telegramInviteResults"]
 		}
@@ -223,9 +245,47 @@ func buildAccountUsers(users []authentikUser) []accountUser {
 	return out
 }
 
+// missingUser is an active, non-expired member with no messenger account at all: someone an admin may want to fill in.
+type missingUser struct {
+	PK               int    `json:"pk"`
+	Username         string `json:"username"`
+	Name             string `json:"name"`
+	Avatar           string `json:"avatar"`
+	MembershipTS     int64  `json:"membershipTS"`
+	TelegramUsername string `json:"telegramUsername"` // a pending request still counts as "no account yet", shown as a hint
+}
+
+// buildMissingUsers lists users who are active, have a membership that has not expired at `now`
+// (unix seconds; no expiration date = not a member) and no Matrix handle and no Telegram ID.
+func buildMissingUsers(users []authentikUser, now int64) []missingUser {
+	out := []missingUser{}
+	for i := range users {
+		u := &users[i]
+		if !u.IsActive || (u.Type != "" && u.Type != "internal") {
+			continue
+		}
+		ts := int64(membershipTS(u))
+		if ts <= now {
+			continue
+		}
+		if len(matrixHandlesOf(u)) > 0 || len(telegramIDsOf(u)) > 0 {
+			continue
+		}
+		out = append(out, missingUser{
+			PK: u.PK, Username: u.Username, Name: u.Name, Avatar: u.Avatar,
+			MembershipTS: ts, TelegramUsername: attrString(u, "telegramUsername"),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Username) < strings.ToLower(out[j].Username)
+	})
+	return out
+}
+
 type accountUsersResponse struct {
-	Stats integrationStats `json:"stats"`
-	Users []accountUser    `json:"users"`
+	Stats   integrationStats `json:"stats"`
+	Users   []accountUser    `json:"users"`
+	Missing []missingUser    `json:"missing"`
 }
 
 // handleAccountUsers serves GET /api/local/account-users from the shared user cache.
@@ -241,8 +301,9 @@ func handleAccountUsers(cache *userCache, authentikURL string) fiber.Handler {
 			return handleCacheError(c, err)
 		}
 		return c.JSON(accountUsersResponse{
-			Stats: computeIntegrationStats(users),
-			Users: buildAccountUsers(users),
+			Stats:   computeIntegrationStats(users),
+			Users:   buildAccountUsers(users),
+			Missing: buildMissingUsers(users, time.Now().Unix()),
 		})
 	}
 }
