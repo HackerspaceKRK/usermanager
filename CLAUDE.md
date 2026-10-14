@@ -31,7 +31,7 @@ This is a single-binary admin UI for managing [Authentik](https://goauthentik.io
 
 - **`main.go`** — sets up routes and starts the server. In production, serves embedded `dist/` and dynamically generates `/config.js` from env vars. In `-dev` mode, spawns `npm run dev` and proxies everything to Vite.
 - **`scan.go`** — WebSocket relay (`/ws/scan`, `/ws/scan/{id}`) that pairs a desktop NFC reader with a mobile browser for Mifare card scanning.
-- **`usercache.go`** — in-memory cache of all Authentik users (10-minute TTL). Exposes `/api/local/cached-users` (filterable/sortable by `membershipExpiration`) and `/api/local/summary` (membership stats). On each cache access within TTL, fetches 1 user ordered by `-last_updated` to validate the token and detect changes. All `/api/v3/*` requests are reverse-proxied directly to Authentik.
+- **`usercache.go`** — in-memory cache of all Authentik users (10-minute TTL). Exposes `/api/local/cached-users` (filterable/sortable by `membershipExpiration`) and `/api/local/summary` (membership stats). On each cache access within TTL, fetches 1 user ordered by `-last_updated` to validate the token and detect changes. A change is detected by comparing that user's `last_updated` with the newest `last_updated` seen when the cache was filled (Authentik's timestamps against each other, never against this server's clock). A cache older than the TTL, or one that cannot be verified, is refetched (see `usercache_test.go`). All `/api/v3/*` requests are reverse-proxied directly to Authentik.
 
 - **`integrations.go`** — Matrix/Telegram integration, a read-only view of attributes maintained by the
   [im-inviter](https://github.com/HackerspaceKRK/im-inviter) bot (contract: its `docs/usermanager-integration.md`).

@@ -55,9 +55,11 @@ func TestComputeIntegrationStats(t *testing.T) {
 		user(6, "empty", map[string]interface{}{"matrixHandles": []interface{}{}, "telegramIDs": []interface{}{}}),
 	}
 	got := computeIntegrationStats(users)
+	// ok: 2 Matrix + 2 Telegram; problem: 1 Matrix; fresh: 1 Matrix; tg-only-string: 2 Telegram.
 	want := integrationStats{
-		Matrix:   matrixStats{Users: 3, Accounts: 4, Healthy: 1, Problems: 1, Unprocessed: 1},
-		Telegram: telegramStats{Users: 2, Accounts: 4, Pending: 1},
+		Overall:  overallStats{People: 4, Accounts: 8, MultiPeople: 2, MultiAccounts: 6}, // "ok" (4) and "tg-only-string" (2)
+		Matrix:   matrixStats{Users: 3, Accounts: 4, MultiUsers: 1, MultiAccounts: 2, Healthy: 1, Problems: 1, Unprocessed: 1},
+		Telegram: telegramStats{Users: 2, Accounts: 4, MultiUsers: 2, MultiAccounts: 4, Pending: 1},
 	}
 	if got != want {
 		t.Fatalf("stats = %+v, want %+v", got, want)
@@ -173,5 +175,21 @@ func TestAccountUsersEndpointAndSummary(t *testing.T) {
 	}
 	if sum.TotalUsers != 2 || sum.Integrations.Matrix.Users != 1 || sum.Integrations.Telegram.Users != 1 {
 		t.Fatalf("summary must carry integration stats: %+v", sum)
+	}
+}
+
+func TestOverallStatsDistinguishPeopleFromAccounts(t *testing.T) {
+	users := []authentikUser{
+		user(1, "single-matrix", map[string]interface{}{"matrixHandles": []interface{}{"@a:x.y"}}),
+		user(2, "single-telegram", map[string]interface{}{"telegramIDs": []interface{}{"1"}}),
+		user(3, "two-matrix", map[string]interface{}{"matrixHandles": []interface{}{"@b:x.y", "@c:x.y"}}),
+		user(4, "one-each", map[string]interface{}{"matrixHandles": []interface{}{"@d:x.y"}, "telegramIDs": []interface{}{"2"}}),
+		user(5, "pending-only", map[string]interface{}{"telegramUsername": "@x_tg"}), // a request, not an account
+		user(6, "nothing", nil),
+	}
+	got := computeIntegrationStats(users).Overall
+	want := overallStats{People: 4, Accounts: 6, MultiPeople: 2, MultiAccounts: 4}
+	if got != want {
+		t.Fatalf("overall = %+v, want %+v", got, want)
 	}
 }
