@@ -5,7 +5,7 @@ import { Loader2Icon, RefreshCwIcon, SearchIcon, SendIcon } from "lucide-react"
 import { useAuth } from "@/auth/AuthContext"
 import { useMe } from "@/hooks/useMe"
 import { listAccountUsers, requestMatrixInvite, requestTelegramInvite } from "@/api/authentik"
-import type { AccountUser, AccountUsersResponse } from "@/api/authentik"
+import type { AccountUser, AccountUsersResponse, MissingUser } from "@/api/authentik"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { MatrixAccountBadge, TelegramAccountBadge, isProblemState } from "@/components/IntegrationBadges"
+import { MembershipBadge } from "@/components/MembershipBadge"
 
 const POLL_MS = 5000 // how often we re-read while a manual invite is waiting for the bot
 const WAIT_TIMEOUT_S = 180 // stop waiting for the bot after this long
@@ -25,6 +26,8 @@ interface AccountRow {
   kind: AccountKind
   id: string // Matrix handle, Telegram ID, or the @username of a pending Telegram request
   pendingUsername: boolean // a Telegram @username that has not sent /start yet (nothing to invite)
+  // A Telegram ID with no trace of ever writing to the bot (typed in by hand): Telegram bots cannot message first.
+  unreachable: boolean
 }
 
 interface LastResult {
@@ -41,16 +44,30 @@ function initials(name: string, username: string): string {
   return (name[0] ?? username[0] ?? "?").toUpperCase()
 }
 
+/**
+ * Can the bot DM this Telegram ID? Only accounts that wrote to it (the bot records them in telegramReachableIDs).
+ * Accounts linked by the bot before that attribute existed have no list but do have telegramStatus: treat them as reachable.
+ * No list and no status = the ID was typed in by hand and never talked to the bot.
+ */
+function telegramReachable(u: AccountUser, id: string): boolean {
+  if (u.telegramReachableIDs != null) return u.telegramReachableIDs.includes(id)
+  return u.telegramStatus !== ""
+}
+
 function accountRows(u: AccountUser): AccountRow[] {
   const rows: AccountRow[] = u.matrixHandles.map((h) => ({
-    key: `matrix:${h}`, kind: "matrix", id: h, pendingUsername: false,
+    key: `matrix:${h}`, kind: "matrix", id: h, pendingUsername: false, unreachable: false,
   }))
   for (const id of u.telegramIDs) {
-    rows.push({ key: `telegram:${id}`, kind: "telegram", id, pendingUsername: false })
+    rows.push({
+      key: `telegram:${id}`, kind: "telegram", id, pendingUsername: false,
+      unreachable: !telegramReachable(u, id),
+    })
   }
   if (u.telegramUsername) {
     rows.push({
       key: `telegram-request:${u.telegramUsername}`, kind: "telegram", id: u.telegramUsername, pendingUsername: true,
+      unreachable: false,
     })
   }
   return rows
@@ -85,6 +102,22 @@ function hasProblem(u: AccountUser): boolean {
 function parseWaitingKey(key: string): { pk: string; kind: string; id: string } {
   const [pk = "", kind = "", ...rest] = key.split(":")
   return { pk, kind, id: rest.join(":") }
+}
+
+function renderKind(row: AccountRow) {
+  return (
+    <Badge variant="secondary" className="text-[10px] uppercase tracking-wide shrink-0">
+      {row.kind === "matrix" ? "Matrix" : "Telegram"}
+    </Badge>
+  )
+}
+
+function renderState(u: AccountUser, row: AccountRow) {
+  return row.kind === "matrix" ? (
+    <MatrixAccountBadge account={u.matrixAccounts?.[row.id]} />
+  ) : (
+    <TelegramAccountBadge pending={row.pendingUsername} unreachable={row.unreachable} />
+  )
 }
 
 export function InvitationsPage() {
@@ -154,7 +187,7 @@ export function InvitationsPage() {
   }, [anyQueued, load])
 
   async function invite(u: AccountUser, row: AccountRow) {
-    if (!token || !me || row.pendingUsername) return
+    if (!token || !me || row.pendingUsername || row.unreachable) return
     const key = `${u.pk}:${row.key}`
     setSending((prev) => ({ ...prev, [key]: true }))
     setInviteError(null)
@@ -187,7 +220,121 @@ export function InvitationsPage() {
     })
   }, [data, search, onlyProblems])
 
+  // Shared by the table (lg and up) and the cards (phones and tablets), so the invite logic lives in one place.
+  function renderUserInfo(u: AccountUser) {
+    return (
+      <>
+        <Avatar>
+          <AvatarImage src={u.avatar} alt={u.name} />
+          <AvatarFallback>{initials(u.name, u.username)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <Link to={`/users/edit/${u.pk}`} className="font-medium leading-tight hover:underline">
+            {u.username}
+          </Link>
+          {!u.isActive && <div className="text-xs text-muted-foreground">inactive</div>}
+          {u.name !== u.username && <div className="text-xs text-muted-foreground leading-tight mt-0.5">{u.name}</div>}
+          {u.matrixStatus && u.matrixStatus !== "ok" && (
+            <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 line-clamp-2" title={u.matrixStatus}>
+              Matrix: {u.matrixStatus}
+            </div>
+          )}
+          {u.telegramStatus && u.telegramStatus !== "ok" && (
+            <div className="mt-1 text-xs text-destructive line-clamp-2" title={u.telegramStatus}>
+              Telegram: {u.telegramStatus}
+            </div>
+          )}
+        </div>
+      </>
+    )
+  }
+
+  function renderLast(u: AccountUser, row: AccountRow) {
+    const result = lastResult(u, row)
+    if (!result) return <span className="text-muted-foreground">—</span>
+    const ok = result.result.startsWith("ok")
+    return (
+      <div title={result.result}>
+        <div className={`line-clamp-2 break-words ${ok ? "" : "text-destructive"}`}>{result.result}</div>
+        <div className="text-xs text-muted-foreground">
+          {formatDistanceToNow(new Date(result.ts * 1000), { addSuffix: true })} ·{" "}
+          {format(new Date(result.ts * 1000), "yyyy-MM-dd HH:mm")} · by {result.by}
+        </div>
+      </div>
+    )
+  }
+
+  function renderAction(u: AccountUser, row: AccountRow) {
+    if (row.pendingUsername) {
+      return (
+        <span className="text-xs text-muted-foreground" title="Nothing to invite yet: this account has to send /start to the bot first">
+          —
+        </span>
+      )
+    }
+    if (row.unreachable) {
+      return (
+        <span
+          className="text-xs text-muted-foreground"
+          title="Telegram bots cannot message someone first: this account has to write to the bot (/start) before it can be invited"
+        >
+          —
+        </span>
+      )
+    }
+    const key = `${u.pk}:${row.key}`
+    const queued = key in waiting || isQueued(u, row)
+    const busy = !!sending[key]
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!me || busy || queued}
+        title={
+          row.kind === "matrix"
+            ? "Invite this account to every configured room and space"
+            : "Send fresh one-time group invite links to this account in a DM"
+        }
+        onClick={() => void invite(u, row)}
+      >
+        {busy || queued ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
+        {queued ? "Queued…" : "Invite"}
+      </Button>
+    )
+  }
+
+  function renderMissing(m: MissingUser) {
+    return (
+      <li key={m.pk} className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar>
+            <AvatarImage src={m.avatar} alt={m.name} />
+            <AvatarFallback>{initials(m.name, m.username)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <Link to={`/users/edit/${m.pk}`} className="font-medium leading-tight hover:underline">
+              {m.username}
+            </Link>
+            {m.name !== m.username && <div className="text-xs text-muted-foreground leading-tight">{m.name}</div>}
+            {m.telegramUsername && (
+              <div className="text-xs text-muted-foreground">Telegram request: {m.telegramUsername}</div>
+            )}
+          </div>
+        </div>
+        <MembershipBadge ts={m.membershipTS} compact />
+      </li>
+    )
+  }
+
+  const emptyText =
+    data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix or Telegram accounts yet."
+
   const stats = data?.stats
+  const missing = data?.missing ?? []
+  const missingShown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return missing.filter((m) => !q || m.username.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+  }, [missing, search])
 
   return (
     <div className="space-y-6">
@@ -217,6 +364,15 @@ export function InvitationsPage() {
                 {stats.overall.accounts} accounts in total. {stats.overall.multiPeople} of those people have several
                 accounts ({stats.overall.multiAccounts} accounts together).
               </div>
+              <div className="text-sm text-muted-foreground">
+                {stats.overall.bothMessengers} on both · {stats.overall.onlyMatrix} only Matrix ·{" "}
+                {stats.overall.onlyTelegram} only Telegram
+              </div>
+              {missing.length > 0 && (
+                <div className="text-sm text-amber-600 dark:text-amber-400">
+                  {missing.length} active {missing.length === 1 ? "member has" : "members have"} neither
+                </div>
+              )}
             </>
           )}
         </div>
@@ -281,11 +437,44 @@ export function InvitationsPage() {
 
       <p className="text-xs text-muted-foreground">
         Invite on a Matrix account sends it to every configured room and space, ignoring an earlier decline. On a Telegram
-        account it sends fresh one-time group invite links in a DM (the account must have sent /start to the bot). The bot
-        picks the request up within about a minute and reports the result here.
+        account it sends fresh one-time group invite links in a DM: Telegram bots cannot message anyone first, so the
+        account must have sent /start to the bot (otherwise there is no Invite button). The bot picks the request up within
+        about a minute and reports the result here.
       </p>
 
-      <div className="rounded-md border overflow-x-auto">
+      {/* Below ~1000px: one card per user (the table needs ~880px; narrower, the Invite button would be off-screen). */}
+      <div className="lg:hidden space-y-3">
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-32 w-full rounded-xl" />)
+        ) : users.length === 0 ? (
+          <div className="rounded-md border py-12 text-center text-muted-foreground">{emptyText}</div>
+        ) : (
+          users.map((u) => (
+            <div key={u.pk} className="rounded-xl border bg-card p-4 space-y-2">
+              <div className="flex items-start gap-3">{renderUserInfo(u)}</div>
+              <div className="divide-y">
+                {accountRows(u).map((row) => (
+                  <div key={row.key} className="py-2.5 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {renderKind(row)}
+                        <span className="font-mono text-sm break-all">{row.id}</span>
+                      </div>
+                      <div className="shrink-0">{renderState(u, row)}</div>
+                    </div>
+                    <div className="flex items-end justify-between gap-2">
+                      <div className="text-sm min-w-0">{renderLast(u, row)}</div>
+                      <div className="shrink-0">{renderAction(u, row)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="hidden lg:block rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -310,107 +499,51 @@ export function InvitationsPage() {
             ) : users.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
-                  {data && data.users.length > 0 ? "No users match the filters." : "No users have Matrix or Telegram accounts yet."}
+                  {emptyText}
                 </TableCell>
               </TableRow>
             ) : (
               users.map((u) => {
                 const rows = accountRows(u)
-                return rows.map((row, i) => {
-                  const key = `${u.pk}:${row.key}`
-                  const queued = key in waiting || isQueued(u, row)
-                  const busy = !!sending[key]
-                  const result = lastResult(u, row)
-                  const ok = result?.result.startsWith("ok")
-                  return (
-                    <TableRow key={key} className={i === 0 ? "border-t-2" : undefined}>
-                      {i === 0 && (
-                        <TableCell rowSpan={rows.length} className="align-top">
-                          <div className="flex items-start gap-3 min-w-40 max-w-56">
-                            <Avatar>
-                              <AvatarImage src={u.avatar} alt={u.name} />
-                              <AvatarFallback>{initials(u.name, u.username)}</AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0">
-                              <Link to={`/users/edit/${u.pk}`} className="font-medium leading-tight hover:underline">
-                                {u.username}
-                              </Link>
-                              {!u.isActive && <div className="text-xs text-muted-foreground">inactive</div>}
-                              {u.name !== u.username && (
-                                <div className="text-xs text-muted-foreground leading-tight mt-0.5">{u.name}</div>
-                              )}
-                              {u.matrixStatus && u.matrixStatus !== "ok" && (
-                                <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 line-clamp-2" title={u.matrixStatus}>
-                                  Matrix: {u.matrixStatus}
-                                </div>
-                              )}
-                              {u.telegramStatus && u.telegramStatus !== "ok" && (
-                                <div className="mt-1 text-xs text-destructive line-clamp-2" title={u.telegramStatus}>
-                                  Telegram: {u.telegramStatus}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                      )}
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-                            {row.kind === "matrix" ? "Matrix" : "Telegram"}
-                          </Badge>
-                          <span className="font-mono text-sm break-all">{row.id}</span>
-                        </div>
+                return rows.map((row, i) => (
+                  <TableRow key={`${u.pk}:${row.key}`} className={i === 0 ? "border-t-2" : undefined}>
+                    {i === 0 && (
+                      <TableCell rowSpan={rows.length} className="align-top">
+                        <div className="flex items-start gap-3 min-w-40 max-w-56">{renderUserInfo(u)}</div>
                       </TableCell>
-                      <TableCell>
-                        {row.kind === "matrix" ? (
-                          <MatrixAccountBadge account={u.matrixAccounts?.[row.id]} />
-                        ) : (
-                          <TelegramAccountBadge pending={row.pendingUsername} />
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm max-w-52">
-                        {result ? (
-                          <div title={result.result}>
-                            <div className={`line-clamp-2 break-words ${ok ? "" : "text-destructive"}`}>{result.result}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(result.ts * 1000), { addSuffix: true })} ·{" "}
-                              {format(new Date(result.ts * 1000), "yyyy-MM-dd HH:mm")} · by {result.by}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.pendingUsername ? (
-                          <span className="text-xs text-muted-foreground" title="Nothing to invite yet: this account has to send /start to the bot first">
-                            —
-                          </span>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={!me || busy || queued}
-                            title={
-                              row.kind === "matrix"
-                                ? "Invite this account to every configured room and space"
-                                : "Send fresh one-time group invite links to this account in a DM"
-                            }
-                            onClick={() => void invite(u, row)}
-                          >
-                            {busy || queued ? <Loader2Icon className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
-                            {queued ? "Queued…" : "Invite"}
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })
+                    )}
+                    <TableCell>
+                      {/* nowrap: an account ID must never be squeezed into one-character lines */}
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        {renderKind(row)}
+                        <span className="font-mono text-sm">{row.id}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{renderState(u, row)}</TableCell>
+                    <TableCell className="text-sm max-w-52">{renderLast(u, row)}</TableCell>
+                    <TableCell className="text-right">{renderAction(u, row)}</TableCell>
+                  </TableRow>
+                ))
               })
             )}
           </TableBody>
         </Table>
       </div>
+
+      {!loading && missing.length > 0 && (
+        <details open className="rounded-xl border bg-card">
+          <summary className="cursor-pointer select-none px-4 py-3 font-medium">
+            Active members with no Matrix or Telegram account ({missingShown.length}
+            {missingShown.length !== missing.length ? ` of ${missing.length}` : ""})
+          </summary>
+          <p className="px-4 pb-2 text-xs text-muted-foreground">
+            Membership not expired, no matrixHandles and no telegramIDs. Open a user to add the accounts by hand.
+          </p>
+          <ul className="divide-y border-t">
+            {missingShown.map((m) => renderMissing(m))}
+          </ul>
+        </details>
+      )}
     </div>
   )
 }

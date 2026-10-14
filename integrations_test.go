@@ -58,7 +58,8 @@ func TestComputeIntegrationStats(t *testing.T) {
 	got := computeIntegrationStats(users)
 	// ok: 2 Matrix + 2 Telegram; problem: 1 Matrix; fresh: 1 Matrix; tg-only-string: 2 Telegram.
 	want := integrationStats{
-		Overall:  overallStats{People: 4, Accounts: 8, MultiPeople: 2, MultiAccounts: 6}, // "ok" (4) and "tg-only-string" (2)
+		// "ok" (4 accounts, both messengers) and "tg-only-string" (2) are multi; problem/fresh are Matrix only.
+		Overall:  overallStats{People: 4, Accounts: 8, MultiPeople: 2, MultiAccounts: 6, BothMessengers: 1, OnlyMatrix: 2, OnlyTelegram: 1},
 		Matrix:   matrixStats{Users: 3, Accounts: 4, MultiUsers: 1, MultiAccounts: 2, Healthy: 1, Problems: 1, Unprocessed: 1},
 		Telegram: telegramStats{Users: 2, Accounts: 4, MultiUsers: 2, MultiAccounts: 4, Pending: 1},
 	}
@@ -189,8 +190,67 @@ func TestOverallStatsDistinguishPeopleFromAccounts(t *testing.T) {
 		user(6, "nothing", nil),
 	}
 	got := computeIntegrationStats(users).Overall
-	want := overallStats{People: 4, Accounts: 6, MultiPeople: 2, MultiAccounts: 4}
+	want := overallStats{People: 4, Accounts: 6, MultiPeople: 2, MultiAccounts: 4, BothMessengers: 1, OnlyMatrix: 2, OnlyTelegram: 1}
 	if got != want {
 		t.Fatalf("overall = %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildMissingUsers(t *testing.T) {
+	const now = int64(1_800_000_000)
+	member := func(pk int, name string, ts float64, attrs map[string]interface{}) authentikUser {
+		if attrs == nil {
+			attrs = map[string]interface{}{}
+		}
+		attrs["membershipExpirationTimestamp"] = ts
+		return user(pk, name, attrs)
+	}
+	inactive := member(7, "inactive", float64(now+100), nil)
+	inactive.IsActive = false
+	service := member(8, "svc", float64(now+100), nil)
+	service.Type = "service_account"
+	users := []authentikUser{
+		member(1, "zed", float64(now+100), nil),                                                 // member, no accounts -> listed
+		member(2, "Alice", float64(now+100), map[string]interface{}{"telegramUsername": "@al"}), // pending request only -> listed with hint
+		member(3, "expired", float64(now-1), nil),                                               // expired
+		member(4, "expires-now", float64(now), nil),                                             // exactly now = expired (same rule as the dashboard)
+		member(5, "has-matrix", float64(now+100), map[string]interface{}{"matrixHandles": []interface{}{"@a:x.y"}}),
+		member(6, "has-tg", float64(now+100), map[string]interface{}{"telegramIDs": "1, 2"}),
+		inactive,
+		service,
+		user(9, "no-membership-date", nil), // never had a membership date -> not a member
+	}
+	got := buildMissingUsers(users, now)
+	names := []string{}
+	for _, g := range got {
+		names = append(names, g.Username)
+	}
+	if !reflect.DeepEqual(names, []string{"Alice", "zed"}) {
+		t.Fatalf("unexpected members without accounts: %v", names)
+	}
+	if got[0].TelegramUsername != "@al" || got[0].MembershipTS != now+100 {
+		t.Fatalf("hint and membership timestamp must be passed through: %+v", got[0])
+	}
+}
+
+func TestTelegramReachableIDsPassThrough(t *testing.T) {
+	users := []authentikUser{
+		user(1, "unknown", map[string]interface{}{"telegramIDs": []interface{}{"1"}}),
+		user(2, "known", map[string]interface{}{"telegramIDs": []interface{}{"2", "3"}, "telegramReachableIDs": []interface{}{"2"}}),
+		user(3, "none-reachable", map[string]interface{}{"telegramIDs": []interface{}{"4"}, "telegramReachableIDs": []interface{}{}}),
+	}
+	got := buildAccountUsers(users)
+	byName := map[string]accountUser{}
+	for _, g := range got {
+		byName[g.Username] = g
+	}
+	if byName["unknown"].TelegramReachableIDs != nil {
+		t.Fatalf("absent attribute must stay null (= unknown): %+v", byName["unknown"].TelegramReachableIDs)
+	}
+	if !reflect.DeepEqual(byName["known"].TelegramReachableIDs, []string{"2"}) {
+		t.Fatalf("reachable ids not passed: %+v", byName["known"].TelegramReachableIDs)
+	}
+	if r := byName["none-reachable"].TelegramReachableIDs; r == nil || len(r) != 0 {
+		t.Fatalf("empty list must stay [] (nothing reachable), got %#v", r)
 	}
 }
