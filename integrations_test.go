@@ -23,6 +23,7 @@ func TestAttrStrings(t *testing.T) {
 		{"mixed separators", "1;2  3,4", []string{"1", "2", "3", "4"}},
 		{"duplicates and blanks", []interface{}{"1", "", " 1 ", "2"}, []string{"1", "2"}},
 		{"single number", float64(5), []string{"5"}},
+		{"case is preserved (Matrix user names are case-sensitive)", []interface{}{"@Jan:x.y", "@jan:x.y"}, []string{"@Jan:x.y", "@jan:x.y"}},
 		{"unsupported type", true, nil},
 	}
 	for _, c := range cases {
