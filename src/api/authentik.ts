@@ -1,10 +1,86 @@
+// Matrix / Telegram integration, maintained by the im-inviter bot
+// (https://github.com/HackerspaceKRK/im-inviter, docs/usermanager-integration.md).
+export type MatrixAccountState =
+  | "joined"
+  | "invited"
+  | "pending"
+  | "left"
+  | "banned"
+  | "error"
+  | "unknown"
+
+export interface MatrixAccount {
+  state: MatrixAccountState
+  detail: string
+  updated: number
+}
+
+export interface MatrixInviteRequest {
+  handle: string
+  by: string
+  ts: number | null
+}
+
+export interface MatrixInviteResult {
+  handle: string
+  by: string
+  ts: number
+  result: string
+  rooms: number
+}
+
+export interface TelegramInviteRequest {
+  id: string
+  by: string
+  ts: number | null
+}
+
+export interface TelegramInviteResult {
+  id: string
+  by: string
+  ts: number
+  result: string
+  groups: number
+}
+
 export interface UserAttributes {
   mifareCardId?: string[]
   bankAccountNumber?: string | string[]
   telegramIDs?: string[]
   membershipExpirationTimestamp?: number
   foundUsBy?: string
+  // Written by the user (Authentik settings) or an admin here; may still be a string until the bot normalizes it.
+  matrixHandles?: string[] | string
+  // Written by the bot only.
+  matrixStatus?: string
+  matrixAccounts?: Record<string, MatrixAccount>
+  matrixInviteResults?: MatrixInviteResult[]
+  telegramUsername?: string
+  telegramStatus?: string
+  // Written here, consumed and cleared by the bot.
+  matrixInviteRequests?: MatrixInviteRequest[]
+  telegramInviteRequests?: TelegramInviteRequest[]
+  telegramInviteResults?: TelegramInviteResult[]
   [key: string]: unknown
+}
+
+/** Reads a list attribute in any stored form: array of strings/numbers or "1, 2" / "1;2" strings. */
+export function listAttr(value: unknown): string[] {
+  const out: string[] = []
+  const add = (s: string) => {
+    const t = s.trim()
+    if (t && !out.includes(t)) out.push(t)
+  }
+  const addSplit = (s: string) => s.split(/[\s,;]+/).forEach(add)
+  if (typeof value === "string") addSplit(value)
+  else if (typeof value === "number") add(String(value))
+  else if (Array.isArray(value)) {
+    for (const v of value) {
+      if (typeof v === "string") addSplit(v)
+      else if (typeof v === "number") add(String(v))
+    }
+  }
+  return out
 }
 
 export interface User {
@@ -189,7 +265,13 @@ export interface SummaryUser {
   membershipTs: number
 }
 
+export interface IntegrationStats {
+  matrix: { users: number; accounts: number; healthy: number; problems: number; unprocessed: number }
+  telegram: { users: number; accounts: number; pending: number }
+}
+
 export interface Summary {
+  integrations?: IntegrationStats // absent when talking to an older server build
   totalUsers: number
   activeMembers: number
   expiredRecently: number
@@ -233,4 +315,75 @@ export async function listGroups(token: string): Promise<Group[]> {
   }
 
   return groups
+}
+
+export interface AccountUser {
+  pk: number
+  username: string
+  name: string
+  avatar: string
+  isActive: boolean
+  matrixHandles: string[]
+  matrixStatus: string
+  matrixAccounts: Record<string, MatrixAccount> | null
+  matrixInviteRequests: MatrixInviteRequest[] | null
+  matrixInviteResults: MatrixInviteResult[] | null
+  telegramIDs: string[]
+  telegramUsername: string
+  telegramStatus: string
+  telegramInviteRequests: TelegramInviteRequest[] | null
+  telegramInviteResults: TelegramInviteResult[] | null
+}
+
+export interface AccountUsersResponse {
+  stats: IntegrationStats
+  users: AccountUser[]
+}
+
+/** Users with at least one messenger account (Matrix handle, Telegram ID or a pending Telegram @username). */
+export async function listAccountUsers(token: string): Promise<AccountUsersResponse> {
+  const res = await fetch("/api/local/account-users", { headers: authHeaders(token) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json() as Promise<AccountUsersResponse>
+}
+
+/**
+ * Appends a request to one of the user's invite queues (`matrixInviteRequests` / `telegramInviteRequests`). The
+ * im-inviter bot picks it up on its next run (about a minute) and records the outcome in the matching `...Results`.
+ * The bot only honors accounts that are on the user's own lists, so a forged request cannot invite anyone else.
+ *
+ * Authentik replaces the WHOLE `attributes` object on PATCH, so we merge into freshly read attributes.
+ */
+async function queueInviteRequest<T extends { by: string; ts: number | null }>(
+  token: string,
+  pk: number,
+  queueKey: "matrixInviteRequests" | "telegramInviteRequests",
+  isSame: (existing: T) => boolean,
+  request: T,
+): Promise<void> {
+  const user = await getUser(token, pk)
+  const stored = user.attributes[queueKey] as unknown
+  const current = (Array.isArray(stored) ? stored : []) as T[]
+  if (current.some(isSame)) return // already queued
+  await updateUser(token, pk, {
+    attributes: { ...user.attributes, [queueKey]: [...current, request] },
+  })
+}
+
+/** Manual Matrix invite: the bot invites the account to every configured room and space. */
+export function requestMatrixInvite(token: string, pk: number, handle: string, by: string): Promise<void> {
+  return queueInviteRequest<MatrixInviteRequest>(
+    token, pk, "matrixInviteRequests",
+    (r) => r.handle === handle,
+    { handle, by, ts: Math.floor(Date.now() / 1000) },
+  )
+}
+
+/** Manual Telegram invite: the bot sends fresh one-time group invite links to the account in a DM. */
+export function requestTelegramInvite(token: string, pk: number, id: string, by: string): Promise<void> {
+  return queueInviteRequest<TelegramInviteRequest>(
+    token, pk, "telegramInviteRequests",
+    (r) => r.id === id,
+    { id, by, ts: Math.floor(Date.now() / 1000) },
+  )
 }

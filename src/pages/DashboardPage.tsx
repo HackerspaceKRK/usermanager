@@ -13,6 +13,8 @@ import {
   ClockIcon,
   AlertCircleIcon,
   ArrowRightIcon,
+  MessagesSquareIcon,
+  SendIcon,
 } from "lucide-react"
 
 function initials(name: string, username: string): string {
@@ -78,6 +80,8 @@ export function DashboardPage() {
       })
   }, [token])
 
+  const matrix = summary?.integrations?.matrix
+  const telegram = summary?.integrations?.telegram
   const today = format(new Date(), "yyyy-MM-dd")
   const yesterday = format(addDays(new Date(), -1), "yyyy-MM-dd")
   const sevenDaysAgo = format(addDays(new Date(), -7), "yyyy-MM-dd")
@@ -184,6 +188,51 @@ export function DashboardPage() {
               to={`/users?membershipFrom=${sevenDaysAgo}&membershipTo=${yesterday}`}
               label="View recently expired"
             />
+          </div>
+        </div>
+
+        {/* Matrix accounts (managed by the im-inviter bot) */}
+        <div className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <MessagesSquareIcon className="size-4" />
+            Users with Matrix
+          </div>
+          {loading ? (
+            <Skeleton className="h-8 w-16" />
+          ) : (
+            <div className="text-3xl font-bold">{matrix?.users ?? "—"}</div>
+          )}
+          {!loading && matrix && (
+            <div className="text-sm text-muted-foreground">
+              {matrix.accounts} accounts · {matrix.healthy} OK ·{" "}
+              <span className={matrix.problems > 0 ? "text-amber-600 dark:text-amber-400" : ""}>
+                {matrix.problems} with problems
+              </span>
+            </div>
+          )}
+          <div className="mt-auto pt-3 border-t">
+            <ViewAllLink to="/invitations" label="View Matrix accounts" />
+          </div>
+        </div>
+
+        {/* Telegram accounts */}
+        <div className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <SendIcon className="size-4" />
+            Users with Telegram
+          </div>
+          {loading ? (
+            <Skeleton className="h-8 w-16" />
+          ) : (
+            <div className="text-3xl font-bold">{telegram?.users ?? "—"}</div>
+          )}
+          {!loading && telegram && (
+            <div className="text-sm text-muted-foreground">
+              {telegram.accounts} accounts · {telegram.pending} waiting for /start
+            </div>
+          )}
+          <div className="mt-auto pt-3 border-t">
+            <ViewAllLink to="/invitations" label="View Telegram status" />
           </div>
         </div>
       </div>

@@ -327,12 +327,13 @@ type summaryUser struct {
 }
 
 type summaryResponse struct {
-	TotalUsers           int           `json:"totalUsers"`
-	ActiveMembers        int           `json:"activeMembers"`
-	ExpiredRecently      int           `json:"expiredRecently"`
-	ExpiringIn7Days      int           `json:"expiringIn7Days"`
-	ExpiredRecentlyUsers []summaryUser `json:"expiredRecentlyUsers"`
-	ExpiringIn7DaysUsers []summaryUser `json:"expiringIn7DaysUsers"`
+	TotalUsers           int              `json:"totalUsers"`
+	ActiveMembers        int              `json:"activeMembers"`
+	ExpiredRecently      int              `json:"expiredRecently"`
+	ExpiringIn7Days      int              `json:"expiringIn7Days"`
+	ExpiredRecentlyUsers []summaryUser    `json:"expiredRecentlyUsers"`
+	ExpiringIn7DaysUsers []summaryUser    `json:"expiringIn7DaysUsers"`
+	Integrations         integrationStats `json:"integrations"`
 }
 
 func handleSummary(cache *userCache, authentikURL string) fiber.Handler {
@@ -353,6 +354,7 @@ func handleSummary(cache *userCache, authentikURL string) fiber.Handler {
 
 		var resp summaryResponse
 		resp.TotalUsers = len(users)
+		resp.Integrations = computeIntegrationStats(users)
 		for i := range users {
 			u := &users[i]
 			ts := int64(membershipTS(u))

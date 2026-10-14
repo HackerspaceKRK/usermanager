@@ -17,7 +17,7 @@ import {
   RotateCcwIcon,
 } from "lucide-react"
 import { useNavigate, useSearchParams, Link } from "react-router-dom"
-import { listUsers, listCachedUsers } from "../api/authentik"
+import { listUsers, listCachedUsers, listAttr } from "../api/authentik"
 import type { User, Pagination } from "../api/authentik"
 import { useAuth } from "../auth/AuthContext"
 import { useGroups } from "../hooks/useGroups"
@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/table"
 import { PageLayout } from "@/components/PageLayout"
 import { MembershipBadge } from "@/components/MembershipBadge"
+import { MessengersCell } from "@/components/IntegrationBadges"
 
 const VISIBILITY_KEY = "usermanager-column-visibility"
 const PAGE_SIZE = 20
@@ -73,6 +74,7 @@ const COLUMN_LABELS: Record<string, string> = {
   mifareCardId: "Mifare IDs",
   bankAccountNumber: "Bank Account",
   telegramIDs: "Telegram IDs",
+  messengers: "Matrix / Telegram",
   created_at: "Created At",
 }
 
@@ -362,6 +364,21 @@ export function UsersPage() {
       },
     },
     {
+      id: "messengers",
+      header: () => <span className="font-bold">Matrix / Telegram</span>,
+      enableHiding: true,
+      enableSorting: false,
+      cell: ({ row }) => (
+        <MessengersCell
+          handles={listAttr(row.original.attributes.matrixHandles)}
+          matrixStatus={row.original.attributes.matrixStatus}
+          telegramIds={listAttr(row.original.attributes.telegramIDs)}
+          telegramUsername={row.original.attributes.telegramUsername}
+          telegramStatus={row.original.attributes.telegramStatus}
+        />
+      ),
+    },
+    {
       id: "email",
       header: ({ column }) => (
         <SortHeader
@@ -495,8 +512,8 @@ export function UsersPage() {
       enableHiding: true,
       enableSorting: false,
       cell: ({ row }) => {
-        const ids = row.original.attributes.telegramIDs
-        if (!ids?.length)
+        const ids = listAttr(row.original.attributes.telegramIDs) // array or "1, 2" string
+        if (!ids.length)
           return <span className="text-muted-foreground text-sm">—</span>
         return (
           <div className="flex flex-wrap gap-1">
