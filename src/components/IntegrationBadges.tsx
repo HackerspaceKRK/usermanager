@@ -1,0 +1,100 @@
+import { Badge } from "@/components/ui/badge"
+import type { MatrixAccount, MatrixAccountState } from "@/api/authentik"
+
+const OK = "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800"
+const INFO = "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800"
+const WARN = "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800"
+const BAD = "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800"
+const MUTED = "bg-muted text-muted-foreground"
+
+const ACCOUNT_STATES: Record<MatrixAccountState, { label: string; className: string }> = {
+  joined: { label: "Joined", className: OK },
+  invited: { label: "Invited", className: INFO },
+  pending: { label: "Not accepted", className: WARN },
+  left: { label: "Declined / left", className: WARN },
+  banned: { label: "Banned", className: BAD },
+  error: { label: "Error", className: BAD },
+  unknown: { label: "Unknown", className: MUTED },
+}
+
+/** State of a single Matrix account as reported by the bot (worst state across all rooms/spaces). */
+export function MatrixAccountBadge({ account }: { account?: MatrixAccount }) {
+  if (!account) {
+    return (
+      <Badge variant="outline" className={MUTED} title="The bot has not processed this account yet">
+        Not processed yet
+      </Badge>
+    )
+  }
+  const style = ACCOUNT_STATES[account.state] ?? ACCOUNT_STATES.unknown
+  return (
+    <Badge variant="outline" className={style.className} title={account.detail || undefined}>
+      {style.label}
+    </Badge>
+  )
+}
+
+/** Overall Matrix status of a user (matrixStatus is "ok" or a description of problems). */
+export function MatrixStatusBadge({ handles, status }: { handles: string[]; status?: string }) {
+  if (handles.length === 0) return <span className="text-muted-foreground text-sm">—</span>
+  const count = `${handles.length} account${handles.length === 1 ? "" : "s"}`
+  if (!status) {
+    return (
+      <Badge variant="outline" className={MUTED} title="The bot has not processed this user yet">
+        {count} · not processed
+      </Badge>
+    )
+  }
+  if (status === "ok") {
+    return (
+      <Badge variant="outline" className={OK}>
+        {count} · OK
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="outline" className={WARN} title={status}>
+      {count} · problem
+    </Badge>
+  )
+}
+
+/** Telegram accounts of a user (telegramIDs) and a pending verification request, if any. */
+export function TelegramStatusBadge({
+  ids,
+  username,
+  status,
+}: {
+  ids: string[]
+  username?: string
+  status?: string
+}) {
+  const failed = !!status && status !== "ok"
+  if (ids.length === 0 && !username && !failed) {
+    return <span className="text-muted-foreground text-sm">—</span>
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {ids.length > 0 && (
+        <Badge variant="outline" className={OK}>
+          {ids.length} account{ids.length === 1 ? "" : "s"}
+        </Badge>
+      )}
+      {username && (
+        <Badge variant="outline" className={WARN} title="Waiting for this Telegram account to send /start to the bot">
+          waiting: {username}
+        </Badge>
+      )}
+      {failed && (
+        <Badge variant="outline" className={BAD} title={status}>
+          problem
+        </Badge>
+      )}
+    </div>
+  )
+}
+
+/** True for account states that need an admin's attention. */
+export function isProblemState(state: MatrixAccountState | undefined): boolean {
+  return state !== "joined" && state !== "invited"
+}

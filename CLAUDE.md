@@ -19,17 +19,26 @@ go run . -dev       # dev mode: spawns Vite and proxies to it on :5173
 docker build -t usermanager .
 ```
 
-There are no automated tests. Verify changes by running `go build ./...` and `npm run build`.
+Go has a small test suite (`go test ./...`, see `integrations_test.go`); the frontend has none. Verify changes by running
+`go vet ./... && go test ./...`, `npm run build`, `npm run lint` and `npx tsc -b --noEmit` (what CI runs).
+Use `go build -o /dev/null ./...`: a plain `go build ./...` overwrites the `usermanager` binary tracked in this repo.
 
 ## Architecture
 
 This is a single-binary admin UI for managing [Authentik](https://goauthentik.io) users. A Go HTTP server embeds the compiled React frontend and proxies Authentik API calls.
 
-### Go backend (`main.go`, `scan.go`, `usercache.go`)
+### Go backend (`main.go`, `scan.go`, `usercache.go`, `integrations.go`)
 
 - **`main.go`** — sets up routes and starts the server. In production, serves embedded `dist/` and dynamically generates `/config.js` from env vars. In `-dev` mode, spawns `npm run dev` and proxies everything to Vite.
 - **`scan.go`** — WebSocket relay (`/ws/scan`, `/ws/scan/{id}`) that pairs a desktop NFC reader with a mobile browser for Mifare card scanning.
 - **`usercache.go`** — in-memory cache of all Authentik users (10-minute TTL). Exposes `/api/local/cached-users` (filterable/sortable by `membershipExpiration`) and `/api/local/summary` (membership stats). On each cache access within TTL, fetches 1 user ordered by `-last_updated` to validate the token and detect changes. All `/api/v3/*` requests are reverse-proxied directly to Authentik.
+
+- **`integrations.go`** — Matrix/Telegram integration, a read-only view of attributes maintained by the
+  [im-inviter](https://github.com/HackerspaceKRK/im-inviter) bot (contract: its `docs/usermanager-integration.md`).
+  `computeIntegrationStats` feeds `integrations` in `/api/local/summary`; `/api/local/matrix-users` lists users that have
+  `matrixHandles` (with the bot's `matrixAccounts` / `matrixInviteResults` / `matrixInviteRequests`). List attributes
+  (`matrixHandles`, `telegramIDs`) may be stored as a JSON array or as a string like `"288245411, 111111111"`;
+  `attrStrings` (Go) and `listAttr` (TS) read both.
 
 **Environment variables:**
 - `AUTHENTIK_URL` (default: `https://auth.hskrk.pl`)
@@ -48,6 +57,15 @@ This is a single-binary admin UI for managing [Authentik](https://goauthentik.io
 **Pages** (`src/pages/`): `UsersPage` uses TanStack Table with manual pagination/sorting; sorting by `membershipExpiration` switches the fetcher to `listCachedUsers` (the local cached endpoint). `EditUserPage` handles both create (`/users/edit/new`) and edit (`/users/edit/:id`) with timezone-aware membership date handling (Europe/Warsaw).
 
 **UI components** (`src/components/ui/`): shadcn/ui style components built on Radix UI primitives + Tailwind CSS v4. The `combobox.tsx` uses `@base-ui/react` (not the standard shadcn registry component). The `@` alias maps to `src/`.
+
+**Attributes and PATCH:** Authentik replaces the WHOLE `attributes` object on `PATCH /core/users/{id}/`. Never send a
+partial object: start from the user's loaded attributes and overwrite only the keys you manage (`mergeAttributes` in
+`EditUserPage`, `requestMatrixInvite` in the API layer). Otherwise attributes of other tools (bot statuses, Authentik
+settings, ...) are wiped. Attribute naming is camelCase (`telegramIDs`, `matrixHandles`, ...).
+
+**Manual Matrix invites:** the Invitations page appends `{handle, by, ts}` to the user's `matrixInviteRequests`; the bot
+executes it on its next run (about a minute) and writes the outcome to `matrixInviteResults`. The page polls while a
+request is queued. The bot only honors handles on that user's own `matrixHandles`, and no Matrix credentials live here.
 
 **Key hooks:**
 - `useAuth()` — token + logout from `AuthContext`

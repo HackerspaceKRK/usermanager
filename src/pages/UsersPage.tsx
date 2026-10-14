@@ -17,7 +17,7 @@ import {
   RotateCcwIcon,
 } from "lucide-react"
 import { useNavigate, useSearchParams, Link } from "react-router-dom"
-import { listUsers, listCachedUsers } from "../api/authentik"
+import { listUsers, listCachedUsers, listAttr } from "../api/authentik"
 import type { User, Pagination } from "../api/authentik"
 import { useAuth } from "../auth/AuthContext"
 import { useGroups } from "../hooks/useGroups"
@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/table"
 import { PageLayout } from "@/components/PageLayout"
 import { MembershipBadge } from "@/components/MembershipBadge"
+import { MatrixStatusBadge, TelegramStatusBadge } from "@/components/IntegrationBadges"
 
 const VISIBILITY_KEY = "usermanager-column-visibility"
 const PAGE_SIZE = 20
@@ -73,6 +74,8 @@ const COLUMN_LABELS: Record<string, string> = {
   mifareCardId: "Mifare IDs",
   bankAccountNumber: "Bank Account",
   telegramIDs: "Telegram IDs",
+  matrixStatus: "Matrix",
+  telegramStatus: "Telegram",
   created_at: "Created At",
 }
 
@@ -495,8 +498,8 @@ export function UsersPage() {
       enableHiding: true,
       enableSorting: false,
       cell: ({ row }) => {
-        const ids = row.original.attributes.telegramIDs
-        if (!ids?.length)
+        const ids = listAttr(row.original.attributes.telegramIDs) // array or "1, 2" string
+        if (!ids.length)
           return <span className="text-muted-foreground text-sm">—</span>
         return (
           <div className="flex flex-wrap gap-1">
@@ -508,6 +511,31 @@ export function UsersPage() {
           </div>
         )
       },
+    },
+    {
+      id: "matrixStatus",
+      header: () => <span className="font-bold">Matrix</span>,
+      enableHiding: true,
+      enableSorting: false,
+      cell: ({ row }) => (
+        <MatrixStatusBadge
+          handles={listAttr(row.original.attributes.matrixHandles)}
+          status={row.original.attributes.matrixStatus}
+        />
+      ),
+    },
+    {
+      id: "telegramStatus",
+      header: () => <span className="font-bold">Telegram</span>,
+      enableHiding: true,
+      enableSorting: false,
+      cell: ({ row }) => (
+        <TelegramStatusBadge
+          ids={listAttr(row.original.attributes.telegramIDs)}
+          username={row.original.attributes.telegramUsername}
+          status={row.original.attributes.telegramStatus}
+        />
+      ),
     },
     {
       id: "created_at",

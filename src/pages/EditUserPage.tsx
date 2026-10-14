@@ -10,14 +10,15 @@ import {
   Loader2Icon,
 } from "lucide-react"
 import { useAuth } from "@/auth/AuthContext"
-import { getUser, updateUser, createUser, setUserPassword, listGroups } from "@/api/authentik"
-import type { User, Group } from "@/api/authentik"
+import { getUser, updateUser, createUser, setUserPassword, listGroups, listAttr } from "@/api/authentik"
+import type { User, Group, UserAttributes } from "@/api/authentik"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PageLayout } from "@/components/PageLayout"
 import { WebNFCScanButton } from "@/components/ScanButton"
 import { ProxmarkScanButton } from "@/components/ProxmarkScanButton"
+import { MatrixAccountBadge } from "@/components/IntegrationBadges"
 import {
   Combobox,
   ComboboxChip,
@@ -33,6 +34,23 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 const TZ = "Europe/Warsaw"
+
+// Basic Matrix ID shape (@localpart:server); the bot does the strict normalization.
+const MXID_RE = /^@[^\s:@]+:[^\s:@]+$/
+
+/**
+ * Authentik replaces the WHOLE `attributes` object on PATCH. Start from the attributes loaded with the user and
+ * overwrite only the keys this form manages (`undefined` removes a key); otherwise every other attribute
+ * (matrixHandles, bot statuses, Authentik's own settings, ...) is silently wiped on save.
+ */
+function mergeAttributes(base: UserAttributes, managed: Record<string, unknown>): UserAttributes {
+  const next: UserAttributes = { ...base }
+  for (const [key, value] of Object.entries(managed)) {
+    if (value === undefined) delete next[key]
+    else next[key] = value
+  }
+  return next
+}
 
 function tsToDateStr(ts: number): string {
   return format(toZonedTime(new Date(ts * 1000), TZ), "yyyy-MM-dd")
@@ -116,6 +134,8 @@ export function EditUserPage() {
   const [allGroups, setAllGroups] = useState<Group[]>([])
   const [foundUsBy, setFoundUsBy] = useState("")
   const [joinedDate, setJoinedDate] = useState("")
+  const [matrixHandles, setMatrixHandles] = useState<string[]>([])
+  const [baseAttributes, setBaseAttributes] = useState<UserAttributes>({}) // as loaded; see mergeAttributes
 
   const [password, setPassword] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -147,11 +167,13 @@ export function EditUserPage() {
         if (u.attributes.membershipExpirationTimestamp) {
           setMembershipDate(tsToDateStr(u.attributes.membershipExpirationTimestamp))
         }
-        setTelegramIds(u.attributes.telegramIDs?.map(String) ?? [])
+        setTelegramIds(listAttr(u.attributes.telegramIDs)) // may be stored as an array or as "1, 2"
         setMifareIds(u.attributes.mifareCardId ?? [])
         setSelectedGroups(u.groups ?? [])
         setFoundUsBy(u.attributes.foundUsBy ?? "")
         setJoinedDate(u.date_joined)
+        setMatrixHandles(listAttr(u.attributes.matrixHandles))
+        setBaseAttributes(u.attributes ?? {})
         setLoadingUser(false)
       })
       .catch((err: unknown) => {
@@ -172,6 +194,8 @@ export function EditUserPage() {
       e.email = "Email is required"
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       e.email = "Enter a valid email address"
+    const badHandle = matrixHandles.map((h) => h.trim()).find((h) => h !== "" && !MXID_RE.test(h))
+    if (badHandle) e.matrix = `Invalid Matrix account: ${badHandle} (expected @user:server)`
     return e
   }
 
@@ -188,15 +212,17 @@ export function EditUserPage() {
     setSaving(true)
     setSaveError(null)
 
-    const attributes = {
+    const cleanedHandles = [...new Set(matrixHandles.map((h) => h.trim().toLowerCase()).filter(Boolean))]
+    const attributes = mergeAttributes(baseAttributes, {
       bankAccountNumber: bankAccounts.filter(Boolean),
       membershipExpirationTimestamp: membershipDate
         ? dateStrToTs(membershipDate)
         : undefined,
       telegramIDs: telegramIds.filter(Boolean),
       mifareCardId: mifareIds.filter(Boolean),
-      foundUsBy: foundUsBy ? foundUsBy : undefined
-    }
+      foundUsBy: foundUsBy ? foundUsBy : undefined,
+      matrixHandles: cleanedHandles.length > 0 ? cleanedHandles : undefined,
+    })
 
     try {
       if (isNew) {
@@ -448,6 +474,48 @@ export function EditUserPage() {
             </Button>
           </div>
 
+          {/* Matrix accounts */}
+          <div className="space-y-2">
+            <Label>Matrix accounts</Label>
+            <div className="space-y-2">
+              {matrixHandles.map((v, i) => (
+                <ListRow key={i} onRemove={() => setMatrixHandles((prev) => prev.filter((_, j) => j !== i))}>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={v}
+                      className="font-mono"
+                      placeholder="@user:matrix.example.org"
+                      onChange={(e) => {
+                        setMatrixHandles((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))
+                        setErrors((prev) => ({ ...prev, matrix: "" }))
+                      }}
+                    />
+                    {!isNew && v.trim() && (
+                      <MatrixAccountBadge account={baseAttributes.matrixAccounts?.[v.trim().toLowerCase()]} />
+                    )}
+                  </div>
+                </ListRow>
+              ))}
+            </div>
+            {errors.matrix && <p className="text-xs text-destructive">{errors.matrix}</p>}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setMatrixHandles((prev) => [...prev, ""])}
+            >
+              <PlusIcon className="size-4" />
+              Add Matrix account
+            </Button>
+            {baseAttributes.matrixStatus && baseAttributes.matrixStatus !== "ok" && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">Bot: {baseAttributes.matrixStatus}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              The bot invites new accounts to the configured rooms automatically. Removing an account here does not
+              remove it from any room. Manual invites: see the Invitations page.
+            </p>
+          </div>
+
           {/* Telegram IDs */}
           <div className="space-y-2">
             <Label>Telegram IDs</Label>
@@ -474,6 +542,19 @@ export function EditUserPage() {
               <PlusIcon className="size-4" />
               Add Telegram ID
             </Button>
+            {baseAttributes.telegramUsername && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Waiting for {baseAttributes.telegramUsername} to send /start to the bot (requested by the user in their
+                Authentik settings).
+              </p>
+            )}
+            {baseAttributes.telegramStatus && baseAttributes.telegramStatus !== "ok" && (
+              <p className="text-xs text-destructive">Bot: {baseAttributes.telegramStatus}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Several accounts per user are fine. The bot adds accounts a user verifies via /start; it never removes
+              entries.
+            </p>
           </div>
 
           {/* Mifare Card IDs */}
