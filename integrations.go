@@ -87,6 +87,32 @@ func telegramIDsOf(u *authentikUser) []string {
 	return attrStrings(u.Attributes["telegramIDs"])
 }
 
+// messengerSearchText is everything a user can be found by in the messengers, lowercased: Matrix handles, Telegram IDs, a pending
+// @username request and the nicks/names the bot discovered (a nick is indexed with and without "@", so "@alice" and "alice" both match).
+func messengerSearchText(u *authentikUser) string {
+	parts := append(matrixHandlesOf(u), telegramIDsOf(u)...)
+	if pending := attrString(u, "telegramUsername"); pending != "" {
+		parts = append(parts, pending)
+	}
+	if u.Attributes != nil {
+		if accounts, ok := u.Attributes["telegramAccounts"].(map[string]interface{}); ok {
+			for _, v := range accounts {
+				info, ok := v.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if nick, _ := info["username"].(string); nick != "" {
+					parts = append(parts, nick, "@"+strings.TrimPrefix(nick, "@"))
+				}
+				if name, _ := info["name"].(string); name != "" {
+					parts = append(parts, name)
+				}
+			}
+		}
+	}
+	return strings.ToLower(strings.Join(parts, "\n"))
+}
+
 type matrixStats struct {
 	Users         int `json:"users"`         // users with at least one Matrix account
 	Accounts      int `json:"accounts"`      // all Matrix accounts

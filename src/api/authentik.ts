@@ -57,6 +57,8 @@ export interface UserAttributes {
   matrixInviteResults?: MatrixInviteResult[]
   telegramUsername?: string
   telegramStatus?: string
+  // Nick and name the bot discovered per Telegram ID (display only).
+  telegramAccounts?: Record<string, TelegramAccountInfo>
   // Written here, consumed and cleared by the bot.
   matrixInviteRequests?: MatrixInviteRequest[]
   telegramInviteRequests?: TelegramInviteRequest[]

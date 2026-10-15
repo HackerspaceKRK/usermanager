@@ -65,10 +65,12 @@ export function TelegramStatusBadge({
   ids,
   username,
   status,
+  accounts,
 }: {
   ids: string[]
   username?: string
   status?: string
+  accounts?: Record<string, { username: string; name: string }>
 }) {
   const failed = !!status && status !== "ok"
   if (ids.length === 0 && !username && !failed) {
@@ -77,8 +79,14 @@ export function TelegramStatusBadge({
   return (
     <div className="flex flex-wrap gap-1">
       {ids.slice(0, SHOWN_IDS).map((id) => (
-        <Badge key={id} variant="outline" className={`${OK} font-mono`} title="Telegram ID">
+        <Badge
+          key={id}
+          variant="outline"
+          className={`${OK} font-mono`}
+          title={accounts?.[id]?.name ? `Telegram ID, ${accounts[id]!.name}` : "Telegram ID"}
+        >
           {id}
+          {accounts?.[id]?.username && <span className="ml-1 font-sans opacity-70">@{accounts[id]!.username}</span>}
         </Badge>
       ))}
       {ids.length > SHOWN_IDS && (
@@ -112,12 +120,14 @@ export function MessengersCell({
   telegramIds,
   telegramUsername,
   telegramStatus,
+  telegramAccounts,
 }: {
   handles: string[]
   matrixStatus?: string
   telegramIds: string[]
   telegramUsername?: string
   telegramStatus?: string
+  telegramAccounts?: Record<string, { username: string; name: string }>
 }) {
   const none = handles.length === 0 && telegramIds.length === 0 && !telegramUsername && !telegramStatus
   if (none) return <span className="text-muted-foreground text-sm">—</span>
@@ -129,7 +139,7 @@ export function MessengersCell({
       </div>
       <div className="flex items-start gap-1.5">
         <span className="w-16 shrink-0 pt-0.5 text-xs text-muted-foreground">Telegram</span>
-        <TelegramStatusBadge ids={telegramIds} username={telegramUsername} status={telegramStatus} />
+        <TelegramStatusBadge ids={telegramIds} username={telegramUsername} status={telegramStatus} accounts={telegramAccounts} />
       </div>
     </div>
   )

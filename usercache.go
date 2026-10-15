@@ -214,7 +214,8 @@ func handleCachedUsers(cache *userCache, authentikURL string) fiber.Handler {
 			if search == "" ||
 				strings.Contains(strings.ToLower(u.Username), search) ||
 				strings.Contains(strings.ToLower(u.Name), search) ||
-				strings.Contains(strings.ToLower(u.Email), search) {
+				strings.Contains(strings.ToLower(u.Email), search) ||
+				strings.Contains(messengerSearchText(&u), search) {
 				filtered = append(filtered, u)
 			}
 		}
@@ -250,29 +251,7 @@ func handleCachedUsers(cache *userCache, authentikURL string) fiber.Handler {
 		}
 
 		// Sort
-		ordering := c.Query("ordering")
-		desc := strings.HasPrefix(ordering, "-")
-		field := strings.TrimPrefix(ordering, "-")
-		if field == "membershipExpiration" {
-			sort.SliceStable(filtered, func(i, j int) bool {
-				ti := membershipTS(&filtered[i])
-				tj := membershipTS(&filtered[j])
-				// no-timestamp users go last regardless of direction
-				if ti == 0 && tj == 0 {
-					return false
-				}
-				if ti == 0 {
-					return false
-				}
-				if tj == 0 {
-					return true
-				}
-				if desc {
-					return ti > tj
-				}
-				return ti < tj
-			})
-		}
+		sortCachedUsers(filtered, c.Query("ordering"))
 
 		// Paginate
 		page := 1
@@ -415,4 +394,53 @@ func handleSummary(cache *userCache, authentikURL string) fiber.Handler {
 
 		return c.JSON(resp)
 	}
+}
+
+// sortCachedUsers orders users by the fields the Users table can sort by (the same set Authentik's own list supports there), so a
+// search served from the cache keeps working with any column sort. Users without a value (no membership date, never logged in)
+// go last in either direction.
+func sortCachedUsers(us []authentikUser, ordering string) {
+	desc := strings.HasPrefix(ordering, "-")
+	field := strings.TrimPrefix(ordering, "-")
+	type key struct {
+		s  string
+		f  float64
+		ok bool
+	}
+	var get func(u *authentikUser) key
+	switch field {
+	case "membershipExpiration":
+		get = func(u *authentikUser) key { ts := membershipTS(u); return key{f: ts, ok: ts != 0} }
+	case "username":
+		get = func(u *authentikUser) key { return key{s: strings.ToLower(u.Username), ok: true} }
+	case "email":
+		get = func(u *authentikUser) key { return key{s: strings.ToLower(u.Email), ok: u.Email != ""} }
+	case "last_login":
+		get = func(u *authentikUser) key {
+			if u.LastLogin == nil || *u.LastLogin == "" {
+				return key{}
+			}
+			return key{s: *u.LastLogin, ok: true}
+		}
+	case "date_joined":
+		get = func(u *authentikUser) key { return key{s: u.DateJoined, ok: u.DateJoined != ""} }
+	default:
+		return
+	}
+	sort.SliceStable(us, func(i, j int) bool {
+		a, b := get(&us[i]), get(&us[j])
+		if !a.ok || !b.ok {
+			return a.ok && !b.ok
+		}
+		var less, greater bool
+		if field == "membershipExpiration" {
+			less, greater = a.f < b.f, a.f > b.f
+		} else {
+			less, greater = a.s < b.s, a.s > b.s
+		}
+		if desc {
+			return greater
+		}
+		return less
+	})
 }
