@@ -54,6 +54,12 @@ function telegramReachable(u: AccountUser, id: string): boolean {
   return u.telegramStatus !== ""
 }
 
+/** @nick and name the bot discovered for a Telegram account row (undefined for Matrix rows and unseen accounts). */
+function telegramInfo(u: AccountUser, row: AccountRow) {
+  if (row.kind !== "telegram" || row.pendingUsername) return undefined
+  return u.telegramAccounts?.[row.id]
+}
+
 function accountRows(u: AccountUser): AccountRow[] {
   const rows: AccountRow[] = u.matrixHandles.map((h) => ({
     key: `matrix:${h}`, kind: "matrix", id: h, pendingUsername: false, unreachable: false,
@@ -102,6 +108,21 @@ function hasProblem(u: AccountUser): boolean {
 function parseWaitingKey(key: string): { pk: string; kind: string; id: string } {
   const [pk = "", kind = "", ...rest] = key.split(":")
   return { pk, kind, id: rest.join(":") }
+}
+
+/** The account ID, with the discovered @nick next to a Telegram ID (muted: it is extra information, not a state). */
+function renderAccountId(u: AccountUser, row: AccountRow, wrap: boolean) {
+  const info = telegramInfo(u, row)
+  return (
+    <>
+      <span className={`font-mono text-sm ${wrap ? "break-all" : ""}`}>{row.id}</span>
+      {info && (info.username || info.name) && (
+        <span className="text-xs text-muted-foreground" title={info.name || undefined}>
+          {info.username ? `@${info.username}` : info.name}
+        </span>
+      )}
+    </>
+  )
 }
 
 function renderKind(row: AccountRow) {
@@ -215,7 +236,7 @@ export function InvitationsPage() {
       return (
         u.username.toLowerCase().includes(q) ||
         u.name.toLowerCase().includes(q) ||
-        accountRows(u).some((r) => r.id.toLowerCase().includes(q))
+        accountRows(u).some((r) => r.id.toLowerCase().includes(q) || (telegramInfo(u, r)?.username ?? "").toLowerCase().includes(q))
       )
     })
   }, [data, search, onlyProblems])
@@ -458,7 +479,7 @@ export function InvitationsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         {renderKind(row)}
-                        <span className="font-mono text-sm break-all">{row.id}</span>
+                        {renderAccountId(u, row, true)}
                       </div>
                       <div className="shrink-0">{renderState(u, row)}</div>
                     </div>
@@ -516,7 +537,7 @@ export function InvitationsPage() {
                       {/* nowrap: an account ID must never be squeezed into one-character lines */}
                       <div className="flex items-center gap-2 whitespace-nowrap">
                         {renderKind(row)}
-                        <span className="font-mono text-sm">{row.id}</span>
+                        {renderAccountId(u, row, false)}
                       </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{renderState(u, row)}</TableCell>

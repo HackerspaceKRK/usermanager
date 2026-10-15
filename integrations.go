@@ -22,6 +22,7 @@ import (
 //   telegramIDs         list of Telegram numeric IDs (several per user are allowed)
 //   telegramUsername    a pending request, cleared by the bot once the account /start-ed it
 //   telegramStatus      last result reported by the bot
+//   telegramAccounts    {ID: {username, name, updated}} discovered by the bot (display only)
 //   telegramReachableIDs  subset of telegramIDs that wrote to the bot (bot-written); Telegram bots cannot message first
 //   telegramInviteRequests / telegramInviteResults   manual "send group invite links" queue and its outcomes
 
@@ -193,6 +194,8 @@ type accountUser struct {
 	TelegramStatus       string      `json:"telegramStatus"`
 	// IDs that wrote to the bot (written by the bot); nil (JSON null) = attribute absent, the UI then falls back to telegramStatus.
 	TelegramReachableIDs []string `json:"telegramReachableIDs"`
+	// Username and name the bot discovered per Telegram ID ({id: {username, name, updated}}); display only.
+	TelegramAccounts interface{} `json:"telegramAccounts"`
 	// Manual "send group links" queue for Telegram accounts and its outcomes (written by usermanager / the bot).
 	TelegramInviteRequests interface{} `json:"telegramInviteRequests"`
 	TelegramInviteResults  interface{} `json:"telegramInviteResults"`
@@ -234,6 +237,7 @@ func buildAccountUsers(users []authentikUser) []accountUser {
 					mu.TelegramReachableIDs = []string{}
 				}
 			}
+			mu.TelegramAccounts = u.Attributes["telegramAccounts"]
 			mu.TelegramInviteRequests = u.Attributes["telegramInviteRequests"]
 			mu.TelegramInviteResults = u.Attributes["telegramInviteResults"]
 		}

@@ -254,3 +254,18 @@ func TestTelegramReachableIDsPassThrough(t *testing.T) {
 		t.Fatalf("empty list must stay [] (nothing reachable), got %#v", r)
 	}
 }
+
+func TestTelegramAccountsPassThrough(t *testing.T) {
+	users := []authentikUser{user(1, "jan", map[string]interface{}{
+		"telegramIDs":      []interface{}{"99"},
+		"telegramAccounts": map[string]interface{}{"99": map[string]interface{}{"username": "jan_k", "name": "Jan K", "updated": float64(5)}},
+	})}
+	got := buildAccountUsers(users)
+	acc, ok := got[0].TelegramAccounts.(map[string]interface{})
+	if !ok || acc["99"] == nil {
+		t.Fatalf("telegramAccounts must be passed through for display: %#v", got[0].TelegramAccounts)
+	}
+	if _, err := json.Marshal(accountUsersResponse{Users: got}); err != nil {
+		t.Fatalf("response must be JSON serializable: %v", err)
+	}
+}
