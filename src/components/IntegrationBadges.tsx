@@ -138,14 +138,19 @@ export function MessengersCell({
 /** State of a single Telegram account row on the Invitations page. */
 export function TelegramAccountBadge({ pending, unreachable }: { pending: boolean; unreachable?: boolean }) {
   if (unreachable) {
+    // The ID is trusted (it is in telegramIDs); this is only a side note that Invite cannot work yet, so it is muted, not a warning.
     return (
-      <Badge
-        variant="outline"
-        className={WARN}
-        title="Telegram bots cannot message someone first: no sign that this account ever wrote to the bot (the ID was probably typed in by hand). It becomes invitable after it sends /grupy to the bot"
-      >
-        Has not started the bot
-      </Badge>
+      <div className="flex flex-col items-start gap-0.5">
+        <Badge variant="outline" className={OK} title="Listed in telegramIDs">
+          Linked
+        </Badge>
+        <span
+          className="text-[11px] text-muted-foreground"
+          title="Telegram bots cannot message someone first. This account has not written to the bot yet, so Invite is unavailable until it sends /start, /grupy or /verify to the bot."
+        >
+          bot can't DM yet
+        </span>
+      </div>
     )
   }
   if (pending) {

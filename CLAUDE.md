@@ -71,7 +71,7 @@ its next run (about a minute) and writes the outcome to `matrixInviteResults` / 
 while a request is queued. The bot only honors accounts on that user's own lists, and no Matrix/Telegram credentials live here.
 
 **Telegram reachability:** a Telegram bot cannot message anyone first, so Invite is hidden for a Telegram ID with no trace of
-contact with the bot (an ID typed in by hand). Rule (`telegramReachable` in `InvitationsPage.tsx`): reachable if the ID is in
+contact with the bot (e.g. an ID added by hand). The ID itself is trusted: this is only a muted side note, not a warning. Rule (`telegramReachable` in `InvitationsPage.tsx`): reachable if the ID is in
 the bot-written `telegramReachableIDs`; if that attribute is absent, the account counts as reachable only when the user has
 `telegramStatus` (linked by the bot before the attribute existed). The bot records contact when the account writes to it
 (`/start`, `/grupy`, button, code); it never probes unknown accounts. `/api/local/account-users` also returns `missing`
