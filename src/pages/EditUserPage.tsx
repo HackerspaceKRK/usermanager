@@ -556,6 +556,22 @@ export function EditUserPage() {
               <PlusIcon className="size-4" />
               Add Telegram ID
             </Button>
+            {telegramIds.some((tgId) => baseAttributes.telegramAccounts?.[tgId]) && (
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <div>Seen by the bot:</div>
+                {telegramIds
+                  .filter((tgId) => baseAttributes.telegramAccounts?.[tgId])
+                  .map((tgId) => {
+                    const info = baseAttributes.telegramAccounts![tgId]!
+                    return (
+                      <div key={tgId}>
+                        <span className="font-mono">{tgId}</span> {info.username ? `@${info.username}` : "(no @username)"}
+                        {info.name ? ` · ${info.name}` : ""}
+                      </div>
+                    )
+                  })}
+              </div>
+            )}
             {baseAttributes.telegramUsername && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
                 Waiting for {baseAttributes.telegramUsername} to send /start to the bot (requested by the user in their

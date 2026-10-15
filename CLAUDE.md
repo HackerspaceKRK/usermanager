@@ -70,6 +70,13 @@ configured room/space) or `telegramInviteRequests` (Telegram: send fresh group i
 its next run (about a minute) and writes the outcome to `matrixInviteResults` / `telegramInviteResults`. The page polls
 while a request is queued. The bot only honors accounts on that user's own lists, and no Matrix/Telegram credentials live here.
 
+**Discovered Telegram nicks:** the bot writes `telegramAccounts` ({ID: {username, name, updated}}) for IDs it has seen; the Invitations page
+shows `@nick` (or the name when the account has none) muted next to the ID and the search box matches it. Display only, nothing here writes it.
+The same nicks are shown in the Users table (Matrix / Telegram column, hidden Telegram IDs column) and on the user edit page ("Seen by the bot").
+**Users search:** any search term is served by `/api/local/cached-users` (not Authentik's own search, which cannot see attributes). It matches
+username, name, email and, via `messengerSearchText`, Matrix handles, Telegram IDs, a pending `@username` and the discovered nicks/names (a nick
+matches with and without `@`). Because of that the cached endpoint sorts by every Users column (`sortCachedUsers`; missing values last).
+
 **Telegram reachability:** a Telegram bot cannot message anyone first, so Invite is hidden for a Telegram ID with no trace of
 contact with the bot (e.g. an ID added by hand). The ID itself is trusted: this is only a muted side note, not a warning. Rule (`telegramReachable` in `InvitationsPage.tsx`): reachable if the ID is in
 the bot-written `telegramReachableIDs`; if that attribute is absent, the account counts as reachable only when the user has

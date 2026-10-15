@@ -280,10 +280,12 @@ export function UsersPage() {
         (SORT_FIELD_MAP[sorting[0]!.id] ?? sorting[0]!.id)
       : undefined
 
+  // The cached endpoint also searches Matrix handles and Telegram IDs/@nicks (Authentik's own search cannot), so any search uses it.
   const shouldUseCachedUsersEndpoint =
     (sorting.length > 0 && sorting[0]!.id === "membershipExpiration") ||
     !!membershipFrom ||
-    !!membershipTo
+    !!membershipTo ||
+    !!debouncedSearch
 
   useEffect(() => {
     if (!token) return
@@ -375,6 +377,7 @@ export function UsersPage() {
           telegramIds={listAttr(row.original.attributes.telegramIDs)}
           telegramUsername={row.original.attributes.telegramUsername}
           telegramStatus={row.original.attributes.telegramStatus}
+          telegramAccounts={row.original.attributes.telegramAccounts}
         />
       ),
     },
@@ -517,11 +520,15 @@ export function UsersPage() {
           return <span className="text-muted-foreground text-sm">—</span>
         return (
           <div className="flex flex-wrap gap-1">
-            {ids.map((id) => (
-              <Badge key={id} variant="outline" className="text-xs">
-                {id}
-              </Badge>
-            ))}
+            {ids.map((id) => {
+              const info = row.original.attributes.telegramAccounts?.[id]
+              return (
+                <Badge key={id} variant="outline" className="text-xs" title={info?.name || undefined}>
+                  {id}
+                  {info?.username && <span className="ml-1 opacity-70">@{info.username}</span>}
+                </Badge>
+              )
+            })}
           </div>
         )
       },
@@ -611,7 +618,7 @@ export function UsersPage() {
           <div className="relative max-w-sm w-full">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search by username, name or email..."
+              placeholder="Search by username, name, email, Matrix or Telegram (ID, @nick)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"

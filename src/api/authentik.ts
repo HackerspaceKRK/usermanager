@@ -57,6 +57,8 @@ export interface UserAttributes {
   matrixInviteResults?: MatrixInviteResult[]
   telegramUsername?: string
   telegramStatus?: string
+  // Nick and name the bot discovered per Telegram ID (display only).
+  telegramAccounts?: Record<string, TelegramAccountInfo>
   // Written here, consumed and cleared by the bot.
   matrixInviteRequests?: MatrixInviteRequest[]
   telegramInviteRequests?: TelegramInviteRequest[]
@@ -336,6 +338,13 @@ export async function listGroups(token: string): Promise<Group[]> {
   return groups
 }
 
+/** Nick and name the bot discovered for a Telegram ID (display only; empty username = the account has none). */
+export interface TelegramAccountInfo {
+  username: string
+  name: string
+  updated: number
+}
+
 export interface AccountUser {
   pk: number
   username: string
@@ -352,6 +361,7 @@ export interface AccountUser {
   telegramStatus: string
   // IDs that wrote to the bot (written by the bot); null = attribute absent (see telegramReachable in InvitationsPage)
   telegramReachableIDs: string[] | null
+  telegramAccounts: Record<string, TelegramAccountInfo> | null
   telegramInviteRequests: TelegramInviteRequest[] | null
   telegramInviteResults: TelegramInviteResult[] | null
 }

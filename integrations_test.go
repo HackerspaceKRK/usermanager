@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -252,5 +253,90 @@ func TestTelegramReachableIDsPassThrough(t *testing.T) {
 	}
 	if r := byName["none-reachable"].TelegramReachableIDs; r == nil || len(r) != 0 {
 		t.Fatalf("empty list must stay [] (nothing reachable), got %#v", r)
+	}
+}
+
+func TestTelegramAccountsPassThrough(t *testing.T) {
+	users := []authentikUser{user(1, "jan", map[string]interface{}{
+		"telegramIDs":      []interface{}{"99"},
+		"telegramAccounts": map[string]interface{}{"99": map[string]interface{}{"username": "jan_k", "name": "Jan K", "updated": float64(5)}},
+	})}
+	got := buildAccountUsers(users)
+	acc, ok := got[0].TelegramAccounts.(map[string]interface{})
+	if !ok || acc["99"] == nil {
+		t.Fatalf("telegramAccounts must be passed through for display: %#v", got[0].TelegramAccounts)
+	}
+	if _, err := json.Marshal(accountUsersResponse{Users: got}); err != nil {
+		t.Fatalf("response must be JSON serializable: %v", err)
+	}
+}
+
+func TestMessengerSearchTextFindsEverythingAUserCanBeFoundBy(t *testing.T) {
+	u := user(1, "jan", map[string]interface{}{
+		"matrixHandles":    []interface{}{"@Jan:Matrix.Org"},
+		"telegramIDs":      "288245411, 111",
+		"telegramUsername": "@Pending_Nick",
+		"telegramAccounts": map[string]interface{}{
+			"288245411": map[string]interface{}{"username": "Jan_TG", "name": "Jan Kowalski"},
+			"111":       map[string]interface{}{"username": "", "name": "Drugie Konto"},
+		},
+	})
+	text := messengerSearchText(&u)
+	for _, q := range []string{"@jan:matrix.org", "288245411", "111", "pending_nick", "jan_tg", "@jan_tg", "jan kowalski", "drugie konto"} {
+		if !strings.Contains(text, q) {
+			t.Errorf("search text must contain %q, got %q", q, text)
+		}
+	}
+	none := user(2, "plain", map[string]interface{}{"mifareCardId": []interface{}{"x"}})
+	if messengerSearchText(&none) != "" {
+		t.Errorf("a user without messenger data must have an empty search text")
+	}
+}
+
+func TestSortCachedUsers(t *testing.T) {
+	s := func(v string) *string { return &v }
+	mk := func(name string, email string, login *string, joined string, ts float64) authentikUser {
+		attrs := map[string]interface{}{}
+		if ts != 0 {
+			attrs["membershipExpirationTimestamp"] = ts
+		}
+		return authentikUser{Username: name, Email: email, LastLogin: login, DateJoined: joined, Attributes: attrs}
+	}
+	users := func() []authentikUser {
+		return []authentikUser{
+			mk("bob", "", s("2026-01-02T00:00:00Z"), "2025-03-01T00:00:00Z", 300),
+			mk("Alice", "a@x.y", nil, "2025-01-01T00:00:00Z", 0),
+			mk("carol", "c@x.y", s("2026-05-01T00:00:00Z"), "", 100),
+		}
+	}
+	names := func(us []authentikUser) []string {
+		out := []string{}
+		for _, u := range us {
+			out = append(out, u.Username)
+		}
+		return out
+	}
+	cases := []struct {
+		ordering string
+		want     []string
+	}{
+		{"username", []string{"Alice", "bob", "carol"}}, // case-insensitive
+		{"-username", []string{"carol", "bob", "Alice"}},
+		{"email", []string{"Alice", "carol", "bob"}},      // no email goes last
+		{"-email", []string{"carol", "Alice", "bob"}},     // ... also when descending
+		{"last_login", []string{"bob", "carol", "Alice"}}, // never logged in goes last
+		{"-last_login", []string{"carol", "bob", "Alice"}},
+		{"date_joined", []string{"Alice", "bob", "carol"}},
+		{"membershipExpiration", []string{"carol", "bob", "Alice"}},
+		{"-membershipExpiration", []string{"bob", "carol", "Alice"}},
+		{"unknown_field", []string{"bob", "Alice", "carol"}}, // unknown: order untouched
+		{"", []string{"bob", "Alice", "carol"}},
+	}
+	for _, c := range cases {
+		us := users()
+		sortCachedUsers(us, c.ordering)
+		if !reflect.DeepEqual(names(us), c.want) {
+			t.Errorf("ordering %q = %v, want %v", c.ordering, names(us), c.want)
+		}
 	}
 }
