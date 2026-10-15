@@ -26,7 +26,7 @@ interface AccountRow {
   kind: AccountKind
   id: string // Matrix handle, Telegram ID, or the @username of a pending Telegram request
   pendingUsername: boolean // a Telegram @username that has not sent /start yet (nothing to invite)
-  // A Telegram ID with no trace of ever writing to the bot (typed in by hand): Telegram bots cannot message first.
+  // A Telegram ID with no trace of ever writing to the bot (e.g. added by hand): the ID is trusted, but the bot cannot DM it yet.
   unreachable: boolean
 }
 
@@ -276,7 +276,7 @@ export function InvitationsPage() {
       return (
         <span
           className="text-xs text-muted-foreground"
-          title="Telegram bots cannot message someone first: this account has to write to the bot (/start) before it can be invited"
+          title="Telegram bots cannot message someone first: Invite becomes available once this account writes to the bot (/start, /grupy or /verify)"
         >
           —
         </span>
@@ -437,8 +437,8 @@ export function InvitationsPage() {
 
       <p className="text-xs text-muted-foreground">
         Invite on a Matrix account sends it to every configured room and space, ignoring an earlier decline. On a Telegram
-        account it sends fresh one-time group invite links in a DM: Telegram bots cannot message anyone first, so the
-        account must have sent /start to the bot (otherwise there is no Invite button). The bot picks the request up within
+        account it sends fresh one-time group invite links in a DM: Telegram bots cannot message anyone first, so Invite is
+        unavailable for accounts that have not written to the bot yet (/start, /grupy or /verify). The bot picks the request up within
         about a minute and reports the result here.
       </p>
 
